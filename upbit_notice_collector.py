@@ -4,12 +4,13 @@ import pandas as pd
 from datetime import datetime
 import time
 import re
+from bs4 import BeautifulSoup
 
 class UpbitNoticeCollector:
     def __init__(self):
-        self.base_url = "https://api-manager.upbit.com/api/v1/notices"
+        self.base_url = "https://upbit.com/service_center/notice"
         self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
     
     def get_notices(self, page=1, per_page=20):
