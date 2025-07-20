@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -240,46 +243,93 @@ func NewBinanceWebSocket(symbols []string, mm *MemoryManager) *BinanceWebSocket 
 	}
 }
 
-// Connect WebSocket 연결
+// Connect WebSocket 연결 (다중 심볼 동시 모니터링)
 func (bws *BinanceWebSocket) Connect(ctx context.Context) error {
-	// 바이낸스 WebSocket URL 구성
-	url := "wss://stream.binance.com:9443/ws/"
+	log.Printf("🔗 바이낸스 WebSocket 연결 중... (%d개 상장 대기 코인)", len(bws.symbols))
 
-	// 여러 심볼 구독
-	streams := make([]string, 0)
-	for _, symbol := range bws.symbols {
-		streams = append(streams, fmt.Sprintf("%s@depth5@100ms", symbol))
+	// 각 심볼별로 개별 WebSocket 연결
+	successCount := 0
+	for i, symbol := range bws.symbols {
+		if err := bws.connectToSymbol(symbol, ctx); err != nil {
+			log.Printf("❌ %s 연결 실패: %v", symbol, err)
+		} else {
+			successCount++
+			if i < 10 || i%50 == 0 { // 처음 10개와 50개마다 로깅
+				log.Printf("✅ %d/%d %s 연결", i+1, len(bws.symbols), symbol)
+			}
+		}
+		time.Sleep(10 * time.Millisecond) // 연결 간격 조절
 	}
 
-	log.Printf("🔗 바이낸스 WebSocket 연결 중... (%d 심볼)", len(bws.symbols))
+	log.Printf("🎯 총 %d/%d 코인 연결 완료", successCount, len(bws.symbols))
+
+	if successCount == 0 {
+		return fmt.Errorf("모든 연결 실패")
+	}
+
+	return nil
+}
+
+// connectToSymbol 개별 심볼 연결
+func (bws *BinanceWebSocket) connectToSymbol(symbol string, ctx context.Context) error {
+	url := fmt.Sprintf("wss://stream.binance.com/ws/%s@trade", symbol)
 
 	dialer := websocket.DefaultDialer
-	dialer.HandshakeTimeout = 10 * time.Second
+	dialer.HandshakeTimeout = 5 * time.Second
 
 	conn, _, err := dialer.Dial(url, nil)
 	if err != nil {
-		return fmt.Errorf("WebSocket 연결 실패: %v", err)
+		return err
 	}
 
-	bws.conn = conn
-
-	// 구독 메시지 전송
-	subscribeMsg := map[string]interface{}{
-		"method": "SUBSCRIBE",
-		"params": streams,
-		"id":     1,
-	}
-
-	if err := conn.WriteJSON(subscribeMsg); err != nil {
-		return fmt.Errorf("구독 메시지 전송 실패: %v", err)
-	}
-
-	log.Printf("✅ 바이낸스 WebSocket 연결 성공!")
-
-	// 메시지 수신 고루틴
-	go bws.handleMessages(ctx)
+	// 개별 고루틴으로 메시지 처리
+	go bws.handleSymbolMessages(symbol, conn, ctx)
 
 	return nil
+}
+
+// handleSymbolMessages 개별 심볼 메시지 처리
+func (bws *BinanceWebSocket) handleSymbolMessages(symbol string, conn *websocket.Conn, ctx context.Context) {
+	defer conn.Close()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			var msg map[string]interface{}
+			err := conn.ReadJSON(&msg)
+			if err != nil {
+				return
+			}
+
+			// 거래 데이터 처리
+			bws.processTradeMessage(msg, symbol)
+		}
+	}
+}
+
+// processTradeMessage 거래 메시지 처리 (펌핑 감지)
+func (bws *BinanceWebSocket) processTradeMessage(msg map[string]interface{}, symbol string) {
+	// 기존 OrderbookSnapshot을 TradeData로 변경
+	if priceStr, ok := msg["p"].(string); ok {
+		if qtyStr, qok := msg["q"].(string); qok {
+			price, _ := strconv.ParseFloat(priceStr, 64)
+			qty, _ := strconv.ParseFloat(qtyStr, 64)
+
+			// 간단한 펌핑 감지 로직
+			bws.detectPumpingSignal(symbol, price, qty)
+		}
+	}
+}
+
+// detectPumpingSignal 간단한 펌핑 감지 로직
+func (bws *BinanceWebSocket) detectPumpingSignal(symbol string, price, qty float64) {
+	// 기본적인 펌핑 감지 (실제로는 더 복잡한 로직 필요)
+	// 여기서는 거래량이 큰 경우만 로깅
+	if qty > 1000 { // 임시 기준
+		log.Printf("📊 %s: 큰 거래 감지 - 가격: $%.6f, 거래량: %.2f", symbol, price, qty)
+	}
 }
 
 // handleMessages 메시지 처리
@@ -403,7 +453,214 @@ func startHTTPServer(mm *MemoryManager) {
 	})
 
 	log.Printf("🌐 HTTP 서버 시작: http://localhost:8080/status")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Fatal(http.ListenAndServe(":8081", nil))
+}
+
+// UpbitMarket 업비트 마켓 정보
+type UpbitMarket struct {
+	Market      string `json:"market"`
+	KoreanName  string `json:"korean_name"`
+	EnglishName string `json:"english_name"`
+}
+
+// BinanceSymbol 바이낸스 심볼 정보
+type BinanceSymbol struct {
+	Symbol string `json:"symbol"`
+	Status string `json:"status"`
+}
+
+// BinanceExchangeInfo 바이낸스 거래소 정보
+type BinanceExchangeInfo struct {
+	Symbols []BinanceSymbol `json:"symbols"`
+}
+
+// CoinListManager 코인 리스트 관리자
+type CoinListManager struct {
+	targetCoinsFile string
+	mutex           sync.RWMutex
+}
+
+// NewCoinListManager 새로운 코인 리스트 관리자 생성
+func NewCoinListManager() *CoinListManager {
+	return &CoinListManager{
+		targetCoinsFile: "target_coins.json",
+	}
+}
+
+// fetchUpbitMarkets 업비트 마켓 정보 가져오기
+func (clm *CoinListManager) fetchUpbitMarkets() ([]UpbitMarket, error) {
+	log.Printf("📡 업비트 마켓 정보 가져오는 중...")
+
+	resp, err := http.Get("https://api.upbit.com/v1/market/all")
+	if err != nil {
+		return nil, fmt.Errorf("업비트 API 호출 실패: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("응답 읽기 실패: %v", err)
+	}
+
+	var markets []UpbitMarket
+	if err := json.Unmarshal(body, &markets); err != nil {
+		return nil, fmt.Errorf("JSON 파싱 실패: %v", err)
+	}
+
+	log.Printf("✅ 업비트 마켓 %d개 조회 완료", len(markets))
+	return markets, nil
+}
+
+// fetchBinanceSymbols 바이낸스 심볼 정보 가져오기
+func (clm *CoinListManager) fetchBinanceSymbols() ([]BinanceSymbol, error) {
+	log.Printf("📡 바이낸스 심볼 정보 가져오는 중...")
+
+	resp, err := http.Get("https://api.binance.com/api/v3/exchangeInfo")
+	if err != nil {
+		return nil, fmt.Errorf("바이낸스 API 호출 실패: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("응답 읽기 실패: %v", err)
+	}
+
+	var exchangeInfo BinanceExchangeInfo
+	if err := json.Unmarshal(body, &exchangeInfo); err != nil {
+		return nil, fmt.Errorf("JSON 파싱 실패: %v", err)
+	}
+
+	log.Printf("✅ 바이낸스 심볼 %d개 조회 완료", len(exchangeInfo.Symbols))
+	return exchangeInfo.Symbols, nil
+}
+
+// calculateTargetCoins 상장 대기 코인 계산
+func (clm *CoinListManager) calculateTargetCoins() ([]string, error) {
+	// 업비트 마켓 정보 가져오기
+	upbitMarkets, err := clm.fetchUpbitMarkets()
+	if err != nil {
+		return nil, fmt.Errorf("업비트 마켓 조회 실패: %v", err)
+	}
+
+	// 바이낸스 심볼 정보 가져오기
+	binanceSymbols, err := clm.fetchBinanceSymbols()
+	if err != nil {
+		return nil, fmt.Errorf("바이낸스 심볼 조회 실패: %v", err)
+	}
+
+	// 업비트 KRW 마켓 코인들 추출
+	upbitKRWCoins := make(map[string]bool)
+	for _, market := range upbitMarkets {
+		if strings.HasPrefix(market.Market, "KRW-") {
+			coin := strings.Replace(market.Market, "KRW-", "", 1)
+			upbitKRWCoins[coin] = true
+		}
+	}
+
+	// 바이낸스 USDT 페어 중 업비트 미상장 코인들 필터링
+	var targetCoins []string
+	for _, symbol := range binanceSymbols {
+		if symbol.Status == "TRADING" && strings.HasSuffix(symbol.Symbol, "USDT") {
+			// USDT 제거해서 베이스 심볼 추출
+			baseCoin := strings.Replace(symbol.Symbol, "USDT", "", 1)
+
+			// 특수 케이스 처리 (1000PEPE -> PEPE)
+			if strings.HasPrefix(baseCoin, "1000") {
+				baseCoin = strings.Replace(baseCoin, "1000", "", 1)
+			}
+
+			// 업비트에 상장되지 않은 코인만 추가
+			if !upbitKRWCoins[baseCoin] {
+				targetCoins = append(targetCoins, strings.ToLower(symbol.Symbol))
+			}
+		}
+	}
+
+	log.Printf("🎯 상장 대기 코인 계산 완료: %d개", len(targetCoins))
+	log.Printf("📊 업비트 KRW 마켓: %d개, 바이낸스 USDT 페어: %d개", len(upbitKRWCoins), len(targetCoins))
+
+	return targetCoins, nil
+}
+
+// saveTargetCoins 상장 대기 코인 목록을 파일에 저장
+func (clm *CoinListManager) saveTargetCoins(coins []string) error {
+	clm.mutex.Lock()
+	defer clm.mutex.Unlock()
+
+	data, err := json.MarshalIndent(coins, "", "  ")
+	if err != nil {
+		return fmt.Errorf("JSON 생성 실패: %v", err)
+	}
+
+	if err := os.WriteFile(clm.targetCoinsFile, data, 0644); err != nil {
+		return fmt.Errorf("파일 저장 실패: %v", err)
+	}
+
+	log.Printf("💾 상장 대기 코인 목록 저장 완료: %s", clm.targetCoinsFile)
+	return nil
+}
+
+// loadTargetCoins 파일에서 상장 대기 코인 목록 읽기
+func (clm *CoinListManager) loadTargetCoins() ([]string, error) {
+	clm.mutex.RLock()
+	defer clm.mutex.RUnlock()
+
+	data, err := os.ReadFile(clm.targetCoinsFile)
+	if err != nil {
+		return nil, fmt.Errorf("파일 읽기 실패: %v", err)
+	}
+
+	var coins []string
+	if err := json.Unmarshal(data, &coins); err != nil {
+		return nil, fmt.Errorf("JSON 파싱 실패: %v", err)
+	}
+
+	log.Printf("📂 파일에서 상장 대기 코인 %d개 로드", len(coins))
+	return coins, nil
+}
+
+// getTargetCoins 상장 대기 코인 목록 가져오기 (API 우선, 실패시 파일)
+func (clm *CoinListManager) getTargetCoins() []string {
+	log.Printf("🔄 상장 대기 코인 목록 업데이트 중...")
+
+	// API로 최신 정보 가져오기 시도
+	coins, err := clm.calculateTargetCoins()
+	if err != nil {
+		log.Printf("⚠️ API 조회 실패: %v", err)
+		log.Printf("📂 백업 파일에서 로드 시도...")
+
+		// 파일에서 읽기 시도
+		if backupCoins, fileErr := clm.loadTargetCoins(); fileErr == nil {
+			log.Printf("✅ 백업 파일에서 %d개 코인 로드 성공", len(backupCoins))
+			return backupCoins
+		} else {
+			log.Printf("❌ 백업 파일 로드도 실패: %v", fileErr)
+			log.Printf("🔧 기본 코인 목록 사용")
+			return clm.getDefaultCoins()
+		}
+	}
+
+	// API 성공시 파일에 저장
+	if saveErr := clm.saveTargetCoins(coins); saveErr != nil {
+		log.Printf("⚠️ 파일 저장 실패: %v", saveErr)
+	}
+
+	return coins
+}
+
+// getDefaultCoins 기본 코인 목록 (최후 백업)
+func (clm *CoinListManager) getDefaultCoins() []string {
+	return []string{
+		"arbusdt", "opusdt", "ldousdt", "wldusdt", "strkusdt",
+		"gmxusdt", "magicusdt", "joeusdt", "avaxusdt", "dotusdt",
+	}
+}
+
+// calculateUnlistedCoins 기존 함수를 새로운 시스템으로 교체
+func calculateUnlistedCoins() []string {
+	coinManager := NewCoinListManager()
+	return coinManager.getTargetCoins()
 }
 
 func main() {
@@ -413,8 +670,8 @@ func main() {
 	// 메모리 관리자 생성
 	memManager := NewMemoryManager()
 
-	// 모니터링할 심볼들
-	symbols := []string{"btcusdt", "ethusdt", "solusdt", "adausdt", "dotusdt"}
+	// 상장 대기 코인들을 자동 계산
+	symbols := calculateUnlistedCoins()
 
 	// 컨텍스트 생성
 	ctx, cancel := context.WithCancel(context.Background())
@@ -432,8 +689,8 @@ func main() {
 	// 메모리 모니터링 고루틴 시작
 	go monitorMemory(memManager)
 
-	// HTTP 서버 시작 (상태 조회용)
-	go startHTTPServer(memManager)
+	// HTTP 서버 시작 (상태 조회용) - 테스트용 비활성화
+	// go startHTTPServer(memManager)
 
 	// 시그널 대기
 	sigChan := make(chan os.Signal, 1)
@@ -442,6 +699,13 @@ func main() {
 	log.Printf("✅ 시스템 준비 완료! Ctrl+C로 종료")
 	log.Printf("📊 모니터링: http://localhost:8080/status")
 	log.Printf("💾 중요 시그널 저장: ./signals/ 디렉토리")
+
+	// 30초 자동 테스트 후 종료
+	go func() {
+		time.Sleep(30 * time.Second)
+		log.Printf("⏰ 30초 테스트 완료 - 자동 종료")
+		sigChan <- syscall.SIGTERM
+	}()
 
 	<-sigChan
 	log.Printf("🔴 시스템 종료 중...")
