@@ -33,6 +33,13 @@ type WebSocketConfig struct {
 	HeartbeatInterval time.Duration `json:"heartbeat_interval"`
 	WorkerCount       int           `json:"worker_count"`
 	BufferSize        int           `json:"buffer_size"`
+	// 자동 재연결 설정
+	MaxReconnectAttempts int           `json:"max_reconnect_attempts"` // 최대 재연결 시도 횟수
+	ReconnectBackoff     time.Duration `json:"reconnect_backoff"`      // 재연결 백오프 간격
+	MaxBackoff           time.Duration `json:"max_backoff"`            // 최대 백오프 시간
+	KeepAliveInterval    time.Duration `json:"keep_alive_interval"`    // PING/PONG 간격
+	ReadTimeout          time.Duration `json:"read_timeout"`           // 읽기 타임아웃
+	WriteTimeout         time.Duration `json:"write_timeout"`          // 쓰기 타임아웃
 }
 
 // MemoryConfig 메모리 관리 설정
@@ -123,11 +130,17 @@ func LoadConfig(configPath string) (*Config, error) {
 			Host: "localhost",
 		},
 		WebSocket: WebSocketConfig{
-			Symbols:           []string{"BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "SOLUSDT"},
-			ReconnectInterval: 5 * time.Second,
-			HeartbeatInterval: 30 * time.Second,
-			WorkerCount:       16,
-			BufferSize:        1000,
+			Symbols:              []string{"BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "SOLUSDT"},
+			ReconnectInterval:    5 * time.Second,
+			HeartbeatInterval:    30 * time.Second,
+			WorkerCount:          16,
+			BufferSize:           1000,
+			MaxReconnectAttempts: 10,
+			ReconnectBackoff:     5 * time.Second,
+			MaxBackoff:           5 * time.Minute,
+			KeepAliveInterval:    30 * time.Second,
+			ReadTimeout:          60 * time.Second,
+			WriteTimeout:         10 * time.Second,
 		},
 		Memory: MemoryConfig{
 			OrderbookRetentionMinutes: 60,

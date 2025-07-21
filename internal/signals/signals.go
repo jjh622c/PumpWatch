@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"noticepumpcatch/internal/memory"
+	"noticepumpcatch/internal/raw"
 	"noticepumpcatch/internal/storage"
 	"noticepumpcatch/internal/triggers"
 )
@@ -16,6 +17,7 @@ type SignalManager struct {
 	memManager     *memory.Manager
 	storageManager *storage.StorageManager
 	triggerManager *triggers.Manager
+	dataHandler    *storage.SignalDataHandler // 시그널 데이터 저장 핸들러
 
 	// 상장공시 콜백 채널
 	listingCallback chan ListingSignal
@@ -67,12 +69,14 @@ func NewSignalManager(
 	memManager *memory.Manager,
 	storageManager *storage.StorageManager,
 	triggerManager *triggers.Manager,
+	rawManager *raw.RawManager, // raw 데이터 관리자 추가
 	config *SignalConfig,
 ) *SignalManager {
 	sm := &SignalManager{
 		memManager:      memManager,
 		storageManager:  storageManager,
 		triggerManager:  triggerManager,
+		dataHandler:     storage.NewSignalDataHandler(storageManager, memManager, rawManager), // raw 데이터 관리자 주입
 		listingCallback: make(chan ListingSignal, 100),
 		config:          config,
 	}
@@ -139,9 +143,14 @@ func (sm *SignalManager) detectPumpSignals() {
 			// 메모리에 저장
 			sm.memManager.AddSignal(signal)
 
-			// 스토리지에 저장
+			// 스토리지에 저장 (기존 시그널 저장)
 			if err := sm.storageManager.SaveSignal(signal); err != nil {
 				log.Printf("❌ 시그널 저장 실패: %v", err)
+			}
+
+			// 🚨 핵심: 시그널 발생 시 ±60초 범위 데이터 즉시 저장
+			if err := sm.dataHandler.SavePumpSignalData(signal); err != nil {
+				log.Printf("❌ 시그널 데이터 저장 실패: %v", err)
 			}
 
 			// 트리거 발생
@@ -373,7 +382,12 @@ func (sm *SignalManager) handleListingSignals() {
 	for signal := range sm.listingCallback {
 		log.Printf("📢 상장공시 신호 수신: %s (신뢰도: %.2f%%)", signal.Symbol, signal.Confidence)
 
-		// ±60초 데이터 수집
+		// 🚨 핵심: 상장공시 시그널 발생 시 ±60초 범위 데이터 즉시 저장
+		if err := sm.dataHandler.SaveListingSignalData(signal.Symbol, signal.Timestamp); err != nil {
+			log.Printf("❌ 상장공시 데이터 저장 실패: %v", err)
+		}
+
+		// ±60초 데이터 수집 (기존 로직 유지)
 		triggerTime := signal.Timestamp
 		startTime := triggerTime.Add(-60 * time.Second)
 		endTime := triggerTime.Add(60 * time.Second)

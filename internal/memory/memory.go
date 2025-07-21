@@ -79,7 +79,7 @@ func NewManager(maxOrderbooks, maxTrades, maxSignals, retentionMinutes int) *Man
 		cleanupInterval:  time.Duration(retentionMinutes) * time.Minute,
 	}
 
-	// 정리 고루틴 시작
+	// 정리 고루틴 시작 (10분마다 실행)
 	go mm.cleanupRoutine()
 
 	return mm
@@ -260,8 +260,9 @@ func (mm *Manager) GetMemoryStats() map[string]interface{} {
 }
 
 // cleanupRoutine 정리 고루틴 (오래된 데이터 제거)
+// cleanupRoutine 정리 고루틴 (10분마다 실행)
 func (mm *Manager) cleanupRoutine() {
-	ticker := time.NewTicker(mm.cleanupInterval)
+	ticker := time.NewTicker(10 * time.Minute) // 10분마다 실행
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -269,12 +270,13 @@ func (mm *Manager) cleanupRoutine() {
 	}
 }
 
-// cleanup 오래된 데이터 정리
+// cleanup 오래된 데이터 정리 (10분 이상 된 데이터만 제거)
 func (mm *Manager) cleanup() {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 
-	cutoffTime := time.Now().Add(-time.Duration(mm.retentionMinutes) * time.Minute)
+	// 10분 이상 된 데이터만 정리 (최소 2-3분치 데이터는 보관)
+	cutoffTime := time.Now().Add(-10 * time.Minute)
 	cleanedOrderbooks := 0
 	cleanedTrades := 0
 
@@ -305,7 +307,7 @@ func (mm *Manager) cleanup() {
 	}
 
 	if cleanedOrderbooks > 0 || cleanedTrades > 0 {
-		log.Printf("🧹 메모리 정리: 오더북 %d개, 체결 %d개 제거", cleanedOrderbooks, cleanedTrades)
+		log.Printf("🧹 메모리 정리: 오더북 %d개, 체결 %d개 제거 (10분 이상)", cleanedOrderbooks, cleanedTrades)
 	}
 }
 
