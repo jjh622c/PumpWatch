@@ -12,6 +12,8 @@ type Config struct {
 	Server       ServerConfig       `json:"server"`
 	WebSocket    WebSocketConfig    `json:"websocket"`
 	Memory       MemoryConfig       `json:"memory"`
+	Storage      StorageConfig      `json:"storage"`
+	Signals      SignalsConfig      `json:"signals"`
 	Triggers     TriggersConfig     `json:"triggers"`
 	Snapshot     SnapshotConfig     `json:"snapshot"`
 	Notification NotificationConfig `json:"notification"`
@@ -42,10 +44,17 @@ type MemoryConfig struct {
 	CleanupIntervalMinutes    int `json:"cleanup_interval_minutes"`
 }
 
-// TriggersConfig 트리거 설정
-type TriggersConfig struct {
-	PumpDetection PumpDetectionConfig   `json:"pump_detection"`
-	Snapshot      SnapshotTriggerConfig `json:"snapshot"`
+// StorageConfig 스토리지 설정
+type StorageConfig struct {
+	BaseDir       string `json:"base_dir"`
+	RetentionDays int    `json:"retention_days"`
+	CompressData  bool   `json:"compress_data"`
+}
+
+// SignalsConfig 시그널 설정
+type SignalsConfig struct {
+	PumpDetection PumpDetectionConfig `json:"pump_detection"`
+	Listing       ListingConfig       `json:"listing"`
 }
 
 // PumpDetectionConfig 펌핑 감지 설정
@@ -55,6 +64,18 @@ type PumpDetectionConfig struct {
 	VolumeThreshold      float64 `json:"volume_threshold"`
 	PriceChangeThreshold float64 `json:"price_change_threshold"`
 	TimeWindowSeconds    int     `json:"time_window_seconds"`
+}
+
+// ListingConfig 상장공시 설정
+type ListingConfig struct {
+	Enabled     bool `json:"enabled"`
+	AutoTrigger bool `json:"auto_trigger"`
+}
+
+// TriggersConfig 트리거 설정
+type TriggersConfig struct {
+	PumpDetection PumpDetectionConfig   `json:"pump_detection"`
+	Snapshot      SnapshotTriggerConfig `json:"snapshot"`
 }
 
 // SnapshotTriggerConfig 스냅샷 트리거 설정
@@ -114,6 +135,24 @@ func LoadConfig(configPath string) (*Config, error) {
 			MaxOrderbooksPerSymbol:    1000,
 			MaxTradesPerSymbol:        1000,
 			CleanupIntervalMinutes:    5,
+		},
+		Storage: StorageConfig{
+			BaseDir:       "./data",
+			RetentionDays: 30,
+			CompressData:  false,
+		},
+		Signals: SignalsConfig{
+			PumpDetection: PumpDetectionConfig{
+				Enabled:              true,
+				MinScore:             70.0,
+				VolumeThreshold:      1000000.0,
+				PriceChangeThreshold: 5.0,
+				TimeWindowSeconds:    300,
+			},
+			Listing: ListingConfig{
+				Enabled:     true,
+				AutoTrigger: false,
+			},
 		},
 		Triggers: TriggersConfig{
 			PumpDetection: PumpDetectionConfig{
@@ -178,6 +217,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Memory.OrderbookRetentionMinutes <= 0 {
 		return fmt.Errorf("오더북 보관 시간은 0보다 커야 합니다")
+	}
+	if c.Storage.RetentionDays <= 0 {
+		return fmt.Errorf("스토리지 보관 기간은 0보다 커야 합니다")
 	}
 	return nil
 }

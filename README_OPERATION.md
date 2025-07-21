@@ -1,341 +1,377 @@
-# 🚀 펌핑 분석 시스템 운영 가이드
+# NoticePumpCatch 운영 가이드
 
-## 📋 목차
-1. [시스템 개요](#시스템-개요)
-2. [설치 및 배포](#설치-및-배포)
-3. [설정](#설정)
-4. [운영](#운영)
-5. [모니터링](#모니터링)
-6. [트러블슈팅](#트러블슈팅)
-7. [백업 및 복구](#백업-및-복구)
+## 개요
 
-## 🎯 시스템 개요
+NoticePumpCatch는 실시간 암호화폐 펌핑 감지 및 상장공시 모니터링 시스템입니다. 이 문서는 시스템 운영에 필요한 모든 정보를 제공합니다.
 
-### 주요 기능
-- **실시간 펌핑 감지**: WebSocket 기반 실시간 데이터 수집 및 분석
-- **멀티스트림 최적화**: 16개 워커 풀로 병렬 처리
-- **자동매매 연동**: 안전한 리스크 관리와 자동 거래
-- **실시간 알림**: 슬랙/텔레그램 연동
-- **백테스트**: 과거 데이터 기반 전략 검증
-- **웹 대시보드**: 실시간 모니터링 및 제어
+## 시스템 아키텍처
 
-### 시스템 아키텍처
+### 핵심 컴포넌트
+
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   WebSocket     │    │   Worker Pool   │    │   Memory        │
-│   (Binance)     │───▶│   (16 workers)  │───▶│   Manager       │
+│   WebSocket     │    │   Memory        │    │   Storage       │
+│   Manager       │───▶│   Manager       │───▶│   Manager       │
+│                 │    │                 │    │                 │
+│ • Binance WS    │    │ • Orderbooks    │    │ • Files         │
+│ • Multi-stream  │    │ • Trades        │    │ • Snapshots     │
+│ • Auto-reconnect│    │ • Signals       │    │ • Cleanup       │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
-                                │                        │
-                                ▼                        ▼
-                       ┌─────────────────┐    ┌─────────────────┐
-                       │   Analyzer      │    │   Trading       │
-                       │   (Real-time)   │    │   Manager       │
-                       └─────────────────┘    └─────────────────┘
-                                │                        │
-                                ▼                        ▼
-                       ┌─────────────────┐    ┌─────────────────┐
-                       │   Notification  │    │   Web Dashboard │
-                       │   (Slack/TG)    │    │   (Port 8081)   │
-                       └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Signal        │    │   Trigger       │    │   Callback      │
+│   Manager       │    │   Manager       │    │   Manager       │
+│                 │    │                 │    │                 │
+│ • Pump Detection│    │ • Event Handlers│    │ • External APIs │
+│ • Listing Alerts│    │ • Snapshots     │    │ • Callbacks     │
+│ • Score Calc    │    │ • Notifications │    │ • Validation    │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
-## 🚀 설치 및 배포
+### 데이터 흐름
 
-### 1. Docker를 이용한 배포 (권장)
+1. **실시간 데이터 수집**
+   - WebSocket → Worker Pool → Memory Manager
+   - 오더북: `@depth20@100ms` 스트림
+   - 체결: `@trade` 스트림
+
+2. **시그널 감지**
+   - Memory Manager → Signal Manager → Trigger Manager
+   - 펌핑 감지: 1초마다 모든 심볼 검사
+   - 상장공시: 외부 콜백을 통한 신호 수신
+
+3. **데이터 저장**
+   - Trigger → Storage Manager → File System
+   - ±60초 스냅샷 자동 저장
+   - 중복 방지 (MD5 해싱)
+
+## 설치 및 설정
+
+### 1. 시스템 요구사항
+
+- **OS**: Linux, macOS, Windows
+- **Go**: 1.19 이상
+- **메모리**: 최소 4GB RAM (권장 8GB)
+- **디스크**: 최소 10GB 여유 공간
+- **네트워크**: 안정적인 인터넷 연결
+
+### 2. 설치
 
 ```bash
-# 1. 저장소 클론
-git clone <repository-url>
+# 저장소 클론
+git clone https://github.com/your-repo/noticepumpcatch.git
 cd noticepumpcatch
 
-# 2. 환경 변수 설정
-cp .env.example .env
-# .env 파일 편집하여 API 키 등 설정
-
-# 3. Docker Compose로 실행
-docker-compose up -d
-
-# 4. 로그 확인
-docker-compose logs -f pump-analyzer
-```
-
-### 2. 로컬 설치
-
-```bash
-# 1. Go 설치 (1.21 이상)
-go version
-
-# 2. 의존성 설치
+# 의존성 설치
 go mod download
 
-# 3. 빌드
-go build -o main .
-
-# 4. 실행
-./main
+# 빌드
+go build -o noticepumpcatch main.go
 ```
 
-### 3. 시스템 요구사항
+### 3. 설정 파일 생성
 
-- **CPU**: 8코어 16스레드 이상 (워커 풀 최적화)
-- **메모리**: 8GB 이상
-- **네트워크**: 안정적인 인터넷 연결
-- **디스크**: 10GB 이상 (로그 및 데이터 저장)
-
-## ⚙️ 설정
-
-### 환경 변수
-
-```bash
-# 알림 설정
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-TELEGRAM_CHAT_ID=your_chat_id
-
-# 거래소 API
-BINANCE_API_KEY=your_binance_api_key
-BINANCE_SECRET_KEY=your_binance_secret_key
-
-# 시스템 설정
-LOG_LEVEL=info
-MAX_WORKERS=16
-MEMORY_RETENTION_MINUTES=10
-```
-
-### 설정 파일
+`config.json` 파일을 생성하고 다음 내용을 추가:
 
 ```json
-// config/settings.json
 {
-  "trading": {
-    "enabled": false,
-    "max_positions": 5,
-    "max_position_size": 1000,
-    "stop_loss": 5.0,
-    "take_profit": 15.0
+  "websocket": {
+    "symbols": ["BTCUSDT", "ETHUSDT", "ADAUSDT", "DOTUSDT"],
+    "reconnect_interval": "5s",
+    "heartbeat_interval": "30s",
+    "worker_count": 4,
+    "buffer_size": 1000
   },
-  "analysis": {
-    "min_volume_change": 300,
-    "min_price_change": 5.0,
-    "signal_threshold": 60.0
+  "memory": {
+    "orderbook_retention_minutes": 60,
+    "trade_retention_minutes": 60,
+    "max_orderbooks_per_symbol": 1000,
+    "max_trades_per_symbol": 5000,
+    "cleanup_interval_minutes": 10
   },
-  "notifications": {
-    "rate_limit_seconds": 30,
-    "enable_slack": true,
-    "enable_telegram": true
+  "signals": {
+    "pump_detection": {
+      "enabled": true,
+      "min_score": 70.0,
+      "volume_threshold": 2.0,
+      "price_change_threshold": 5.0,
+      "time_window_seconds": 60
+    },
+    "listing": {
+      "enabled": true,
+      "auto_trigger": false
+    }
+  },
+  "storage": {
+    "base_dir": "./data",
+    "retention_days": 30,
+    "compress_data": false
+  },
+  "triggers": {
+    "pump_detection": {
+      "enabled": true,
+      "min_score": 70.0,
+      "volume_threshold": 2.0,
+      "price_change_threshold": 5.0,
+      "time_window_seconds": 60
+    },
+    "snapshot": {
+      "pre_trigger_seconds": 60,
+      "post_trigger_seconds": 60,
+      "max_snapshots_per_day": 100
+    }
+  },
+  "notification": {
+    "slack_webhook": "",
+    "telegram_token": "",
+    "telegram_chat_id": "",
+    "alert_threshold": 80
+  },
+  "logging": {
+    "level": "info",
+    "output_file": "./logs/noticepumpcatch.log",
+    "max_size": 100,
+    "max_backups": 10
   }
 }
 ```
 
-## 🎮 운영
+## 운영 가이드
 
-### 1. 서비스 시작/중지
-
-```bash
-# Docker Compose
-docker-compose start pump-analyzer
-docker-compose stop pump-analyzer
-docker-compose restart pump-analyzer
-
-# 로컬 실행
-./main
-# Ctrl+C로 종료
-```
-
-### 2. 웹 대시보드 접속
-
-```
-http://localhost:8081
-```
-
-### 3. API 엔드포인트
+### 1. 시스템 시작
 
 ```bash
-# 시스템 상태
-GET /api/status
+# 기본 실행
+./noticepumpcatch
 
-# 심볼 리스트
-GET /api/symbols
+# 설정 파일 지정
+./noticepumpcatch -config config.json
 
-# 자동매매 활성화
-POST /api/trading/enable
+# 백그라운드 실행
+nohup ./noticepumpcatch > output.log 2>&1 &
 
-# 자동매매 비활성화
-POST /api/trading/disable
-
-# 백테스트 실행
-POST /api/backtest/run
-
-# 알림 테스트
-POST /api/notifications/test
-
-# 로그 조회
-GET /api/logs?lines=100
+# Docker 실행
+docker run -d --name noticepumpcatch \
+  -v $(pwd)/data:/app/data \
+  -v $(pwd)/config.json:/app/config.json \
+  noticepumpcatch:latest
 ```
 
-### 4. 로그 관리
+### 2. 모니터링
+
+#### 시스템 상태 확인
 
 ```bash
-# 실시간 로그 확인
-docker-compose logs -f pump-analyzer
+# 프로세스 확인
+ps aux | grep noticepumpcatch
 
-# 로그 파일 위치
-./logs/
-./signals/  # 중요 시그널 저장
+# 로그 확인
+tail -f logs/noticepumpcatch.log
+
+# 메모리 사용량 확인
+top -p $(pgrep noticepumpcatch)
 ```
 
-## 📊 모니터링
+#### 실시간 통계
 
-### 1. 시스템 상태 모니터링
+시스템이 실행되면 30초마다 다음과 같은 통계가 출력됩니다:
+
+```
+📊 메모리: 오더북 1500개, 체결 7500개, 시그널 25개
+🔧 WebSocket: 연결=true, 오더북버퍼=45/1000, 체결버퍼=120/1000
+⚡ 성능: 오버플로우 0회, 지연 2회
+🚨 트리거: 총 15개, 오늘 3개
+📈 시그널: 총 25개, 펌핑 18개, 평균점수 75.2
+💾 스토리지: 시그널 25개, 오더북 1500개, 체결 7500개, 스냅샷 15개
+📞 콜백: 상장공시 2개 등록
+```
+
+### 3. 데이터 관리
+
+#### 저장소 구조
+
+```
+data/
+├── signals/                    # 시그널 데이터
+│   └── 2024-01-15/
+│       ├── pump_BTCUSDT_20240115_143022.json
+│       └── listing_ETHUSDT_20240115_143045.json
+├── orderbooks/                 # 오더북 데이터
+│   └── 2024-01-15/
+│       ├── BTCUSDT_orderbooks.json
+│       └── ETHUSDT_orderbooks.json
+├── trades/                     # 체결 데이터
+│   └── 2024-01-15/
+│       ├── BTCUSDT_trades.json
+│       └── ETHUSDT_trades.json
+└── snapshots/                  # 스냅샷 데이터
+    └── 2024-01-15/
+        ├── pump_BTCUSDT_143022_snapshot.json
+        └── listing_ETHUSDT_143045_snapshot.json
+```
+
+#### 데이터 정리
 
 ```bash
-# 헬스체크
-curl http://localhost:8081/api/status
+# 수동 정리 (30일 이상 된 데이터)
+find data/ -name "*.json" -mtime +30 -delete
 
-# 응답 예시
-{
-  "system": {
-    "health_status": "HEALTHY",
-    "uptime": "2h 30m",
-    "error_count": 0,
-    "warning_count": 2
-  },
-  "workers": {
-    "active_workers": 12,
-    "worker_count": 16,
-    "data_channel_buffer": 45
-  },
-  "performance": {
-    "peak_throughput": 1500,
-    "average_throughput": 1200,
-    "overflow_count": 0
-  }
+# 디스크 사용량 확인
+du -sh data/
+
+# 파일 개수 확인
+find data/ -name "*.json" | wc -l
+```
+
+### 4. 외부 콜백 설정
+
+#### 상장공시 콜백 등록
+
+```go
+package main
+
+import (
+    "noticepumpcatch/internal/signals"
+    "log"
+)
+
+type MyListingHandler struct{}
+
+func (h *MyListingHandler) OnListingAnnouncement(signal signals.ListingSignal) {
+    log.Printf("상장공시 감지: %s (신뢰도: %.2f%%)", signal.Symbol, signal.Confidence)
+    // 여기에 상장공시 처리 로직 추가
+}
+
+func main() {
+    // 콜백 등록
+    callbackManager.RegisterListingCallback(&MyListingHandler{})
 }
 ```
 
-### 2. Prometheus + Grafana 모니터링
+#### 상장공시 신호 트리거
 
-```bash
-# Prometheus 접속
-http://localhost:9090
+```go
+// Application 인스턴스를 통해
+app.TriggerListingSignal("NEWUSDT", "binance", "external_api", 95.0)
 
-# Grafana 접속
-http://localhost:3000
-# ID: admin, PW: admin
+// 또는 CallbackManager 직접 사용
+callbackManager.TriggerListingAnnouncement("NEWUSDT", "binance", "manual", 95.0)
 ```
 
-### 3. 알림 설정
-
-#### 슬랙 설정
-1. 슬랙 워크스페이스에서 앱 생성
-2. Incoming Webhooks 활성화
-3. Webhook URL 복사하여 환경 변수 설정
-
-#### 텔레그램 설정
-1. @BotFather에서 봇 생성
-2. 봇 토큰 복사
-3. 채팅방에 봇 초대
-4. 채팅 ID 확인: `https://api.telegram.org/bot<TOKEN>/getUpdates`
-
-## 🔧 트러블슈팅
+## 문제 해결
 
 ### 1. 일반적인 문제
 
 #### WebSocket 연결 실패
-```bash
-# 로그 확인
-docker-compose logs pump-analyzer | grep "WebSocket"
+```
+❌ WebSocket 연결 실패: dial tcp: lookup stream.binance.com: no such host
+```
 
-# 해결 방법
+**해결 방법**:
 - 네트워크 연결 확인
+- DNS 설정 확인
 - 방화벽 설정 확인
-- 바이낸스 API 상태 확인
+
+#### 메모리 부족
+```
+❌ 메모리 할당 실패: cannot allocate memory
 ```
 
-#### 메모리 사용량 높음
-```bash
-# 메모리 사용량 확인
-docker stats pump-analyzer
+**해결 방법**:
+- 메모리 사용량 모니터링
+- 설정에서 `max_orderbooks_per_symbol`, `max_trades_per_symbol` 값 조정
+- 시스템 메모리 증설
 
-# 해결 방법
-- 워커 수 조정 (MAX_WORKERS 환경 변수)
-- 메모리 보관 시간 단축 (MEMORY_RETENTION_MINUTES)
+#### 디스크 공간 부족
+```
+❌ 파일 저장 실패: no space left on device
 ```
 
-#### 알림이 오지 않음
-```bash
-# 알림 테스트
-curl -X POST http://localhost:8081/api/notifications/test
-
-# 해결 방법
-- API 키/토큰 확인
-- 레이트 리밋 확인 (30초 간격)
-- 네트워크 연결 확인
-```
+**해결 방법**:
+- 디스크 사용량 확인: `df -h`
+- 오래된 데이터 정리
+- `retention_days` 설정 조정
 
 ### 2. 성능 최적화
 
 #### 처리량 향상
-```bash
-# 워커 수 증가 (CPU 코어 수에 맞춤)
-MAX_WORKERS=32
-
-# 버퍼 크기 증가
-DATA_CHANNEL_BUFFER=2000
+```json
+{
+  "websocket": {
+    "worker_count": 8,        // 워커 수 증가
+    "buffer_size": 2000       // 버퍼 크기 증가
+  },
+  "memory": {
+    "max_orderbooks_per_symbol": 2000,  // 오더북 저장량 증가
+    "max_trades_per_symbol": 10000      // 체결 저장량 증가
+  }
+}
 ```
 
-#### 메모리 최적화
-```bash
-# 보관 시간 단축
-MEMORY_RETENTION_MINUTES=5
-
-# 가비지 컬렉션 강제
-# 시스템 재시작 필요
+#### 메모리 사용량 최적화
+```json
+{
+  "memory": {
+    "orderbook_retention_minutes": 30,  // 보존 시간 단축
+    "trade_retention_minutes": 30,
+    "cleanup_interval_minutes": 5       // 정리 주기 단축
+  }
+}
 ```
 
 ### 3. 로그 분석
 
-```bash
-# 에러 로그만 확인
-docker-compose logs pump-analyzer | grep "ERROR"
-
-# 특정 시간대 로그
-docker-compose logs pump-analyzer --since="2024-01-01T10:00:00"
-
-# 실시간 로그 필터링
-docker-compose logs -f pump-analyzer | grep "펌핑"
+#### 로그 레벨 설정
+```json
+{
+  "logging": {
+    "level": "debug",    // 상세 로그
+    "level": "info",     // 일반 로그 (기본값)
+    "level": "warn",     // 경고만
+    "level": "error"     // 오류만
+  }
+}
 ```
 
-## 💾 백업 및 복구
+#### 로그 패턴 분석
+```bash
+# 펌핑 감지 로그
+grep "🚨 펌핑 감지" logs/noticepumpcatch.log
+
+# 상장공시 로그
+grep "📢 상장공시" logs/noticepumpcatch.log
+
+# 오류 로그
+grep "❌" logs/noticepumpcatch.log
+
+# 성능 로그
+grep "⚡" logs/noticepumpcatch.log
+```
+
+## 백업 및 복구
 
 ### 1. 데이터 백업
 
 ```bash
-# 중요 데이터 백업
-tar -czf backup-$(date +%Y%m%d).tar.gz \
-  ./signals/ \
-  ./config/ \
-  ./data/ \
-  .env
+# 전체 데이터 백업
+tar -czf backup_$(date +%Y%m%d_%H%M%S).tar.gz data/
 
-# Docker 볼륨 백업
-docker run --rm -v pump-analyzer_signals:/data -v $(pwd):/backup alpine tar czf /backup/signals-backup.tar.gz -C /data .
+# 설정 파일 백업
+cp config.json backup_config_$(date +%Y%m%d_%H%M%S).json
+
+# 로그 백업
+tar -czf logs_backup_$(date +%Y%m%d_%H%M%S).tar.gz logs/
 ```
 
-### 2. 복구 절차
+### 2. 데이터 복구
 
 ```bash
-# 1. 서비스 중지
-docker-compose stop pump-analyzer
+# 데이터 복구
+tar -xzf backup_20240115_143022.tar.gz
 
-# 2. 백업 데이터 복원
-tar -xzf backup-20240101.tar.gz
-
-# 3. 서비스 재시작
-docker-compose start pump-analyzer
-
-# 4. 상태 확인
-curl http://localhost:8081/api/status
+# 설정 파일 복구
+cp backup_config_20240115_143022.json config.json
 ```
 
 ### 3. 자동 백업 스크립트
@@ -344,112 +380,147 @@ curl http://localhost:8081/api/status
 #!/bin/bash
 # backup.sh
 
-BACKUP_DIR="/backup"
+BACKUP_DIR="/backup/noticepumpcatch"
 DATE=$(date +%Y%m%d_%H%M%S)
 
+# 백업 디렉토리 생성
+mkdir -p $BACKUP_DIR
+
 # 데이터 백업
-docker run --rm \
-  -v pump-analyzer_signals:/data \
-  -v $BACKUP_DIR:/backup \
-  alpine tar czf /backup/signals-$DATE.tar.gz -C /data .
+tar -czf $BACKUP_DIR/data_$DATE.tar.gz data/
 
-# 7일 이전 백업 삭제
-find $BACKUP_DIR -name "signals-*.tar.gz" -mtime +7 -delete
+# 설정 백업
+cp config.json $BACKUP_DIR/config_$DATE.json
+
+# 30일 이상 된 백업 삭제
+find $BACKUP_DIR -name "*.tar.gz" -mtime +30 -delete
+find $BACKUP_DIR -name "config_*.json" -mtime +30 -delete
+
+echo "백업 완료: $DATE"
 ```
 
-## 🔒 보안
+## 보안 고려사항
 
-### 1. API 키 보안
+### 1. 네트워크 보안
+- 방화벽 설정으로 불필요한 포트 차단
+- VPN 사용 권장
+- API 키 보안 관리
+
+### 2. 데이터 보안
+- 민감한 데이터 암호화
+- 접근 권한 제한
+- 정기적인 보안 감사
+
+### 3. 시스템 보안
+- 정기적인 시스템 업데이트
+- 로그 모니터링
+- 백업 데이터 보안
+
+## 모니터링 대시보드
+
+### 1. 시스템 상태 대시보드
 
 ```bash
-# 환경 변수 파일 권한 설정
-chmod 600 .env
+# 실시간 모니터링 스크립트
+#!/bin/bash
+# monitor.sh
 
-# Docker 시크릿 사용 (프로덕션)
-docker secret create binance_api_key ./binance_api_key.txt
+while true; do
+    clear
+    echo "=== NoticePumpCatch 모니터링 ==="
+    echo "시간: $(date)"
+    echo ""
+    
+    # 프로세스 상태
+    if pgrep -x "noticepumpcatch" > /dev/null; then
+        echo "✅ 프로세스 상태: 실행 중"
+    else
+        echo "❌ 프로세스 상태: 중지됨"
+    fi
+    
+    # 메모리 사용량
+    MEMORY=$(ps -o rss= -p $(pgrep noticepumpcatch) 2>/dev/null)
+    if [ ! -z "$MEMORY" ]; then
+        echo "💾 메모리 사용량: $((MEMORY/1024)) MB"
+    fi
+    
+    # 디스크 사용량
+    DISK_USAGE=$(du -sh data/ 2>/dev/null | cut -f1)
+    echo "💿 디스크 사용량: $DISK_USAGE"
+    
+    # 최근 로그
+    echo ""
+    echo "📋 최근 로그 (마지막 5줄):"
+    tail -5 logs/noticepumpcatch.log
+    
+    sleep 10
+done
 ```
 
-### 2. 네트워크 보안
+### 2. 알림 설정
 
-```bash
-# 방화벽 설정
-ufw allow 8081/tcp
-ufw deny 22/tcp  # SSH 비활성화 (선택사항)
-
-# Docker 네트워크 격리
-docker network create --driver bridge --internal pump-internal
+#### Slack 알림
+```json
+{
+  "notification": {
+    "slack_webhook": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+  }
+}
 ```
 
-### 3. 로그 보안
-
-```bash
-# 민감한 정보 마스킹
-sed -i 's/API_KEY=.*/API_KEY=***/g' logs/*.log
-
-# 로그 로테이션
-logrotate /etc/logrotate.d/pump-analyzer
+#### Telegram 알림
+```json
+{
+  "notification": {
+    "telegram_token": "YOUR_BOT_TOKEN",
+    "telegram_chat_id": "YOUR_CHAT_ID"
+  }
+}
 ```
 
-## 📈 성능 튜닝
+## 성능 튜닝
 
-### 1. 시스템 튜닝
+### 1. 시스템 리소스 최적화
 
-```bash
-# 파일 디스크립터 제한 증가
-echo "* soft nofile 65536" >> /etc/security/limits.conf
-echo "* hard nofile 65536" >> /etc/security/limits.conf
+#### CPU 최적화
+- 워커 풀 크기 조정
+- 고루틴 수 제한
+- CPU 친화성 설정
 
-# TCP 튜닝
-echo "net.core.somaxconn = 65535" >> /etc/sysctl.conf
-echo "net.ipv4.tcp_max_syn_backlog = 65535" >> /etc/sysctl.conf
-sysctl -p
-```
+#### 메모리 최적화
+- 객체 풀 사용
+- 가비지 컬렉션 튜닝
+- 메모리 매핑 파일 사용
 
-### 2. Docker 튜닝
+#### 디스크 I/O 최적화
+- SSD 사용 권장
+- 파일 시스템 최적화
+- 비동기 I/O 사용
 
-```yaml
-# docker-compose.yml
-services:
-  pump-analyzer:
-    deploy:
-      resources:
-        limits:
-          cpus: '4.0'
-          memory: 4G
-        reservations:
-          cpus: '2.0'
-          memory: 2G
-    ulimits:
-      nofile:
-        soft: 65536
-        hard: 65536
-```
+### 2. 네트워크 최적화
 
-## 📞 지원
+#### WebSocket 최적화
+- 연결 풀 사용
+- 재연결 로직 최적화
+- 데이터 압축 사용
 
-### 연락처
-- **이슈 리포트**: GitHub Issues
-- **문서**: README_OPERATION.md
-- **로그**: `./logs/` 디렉토리
+#### 대역폭 최적화
+- 불필요한 데이터 필터링
+- 데이터 압축
+- 배치 처리
 
-### 유용한 명령어
+## 결론
 
-```bash
-# 전체 시스템 상태 확인
-docker-compose ps
-docker stats
+이 운영 가이드를 통해 NoticePumpCatch 시스템을 안정적으로 운영할 수 있습니다. 정기적인 모니터링과 백업을 통해 시스템의 안정성과 성능을 유지하시기 바랍니다.
 
-# 로그 실시간 모니터링
-docker-compose logs -f --tail=100 pump-analyzer
+### 지원 및 문의
 
-# 설정 변경 후 재시작
-docker-compose restart pump-analyzer
+- **GitHub Issues**: 버그 리포트 및 기능 요청
+- **Documentation**: 상세한 API 문서
+- **Community**: 개발자 커뮤니티
 
-# 완전 초기화
-docker-compose down -v
-docker-compose up -d
-```
+### 버전 정보
 
----
-
-**⚠️ 주의사항**: 이 시스템은 실시간 거래에 사용되므로, 충분한 테스트 후 운영 환경에 배포하시기 바랍니다. 
+- **현재 버전**: 1.0.0
+- **Go 버전**: 1.19+
+- **최종 업데이트**: 2024년 1월 
