@@ -1,39 +1,4 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# 분석 결과 디렉토리
-analysis_results/
-*.csv
-*.png
-*.json
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-# Temporary files
-*.tmp
-*.temp
-
-# Go
+# Binaries
 *.exe
 *.exe~
 *.dll
@@ -41,20 +6,46 @@ Thumbs.db
 *.dylib
 *.test
 *.out
+noticepumpcatch
+main
+symbol_sync_fixed
+symbol_sync_test
+latency_test
+test_logging
+
+# Go
 go.work
 
 # Build artifacts
 build/
 dist/
 
-# Data files (raw market data)
-data/raw/
-data/signals/
-data/snapshots/
-data/trades/
-
-# Logs
+# Data files (exclude from git)
+data/
 logs/
+snapshots/
+signals/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Analysis results
+analysis_results/
+*.csv
+*.png
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
 *.log
 
 # IDE

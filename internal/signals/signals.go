@@ -7,17 +7,16 @@ import (
 	"time"
 
 	"noticepumpcatch/internal/memory"
-	"noticepumpcatch/internal/raw"
 	"noticepumpcatch/internal/storage"
 	"noticepumpcatch/internal/triggers"
 )
 
-// SignalManager 시그널 관리자
+// SignalManager 시그널 관리자 (메모리 기반)
 type SignalManager struct {
 	memManager     *memory.Manager
 	storageManager *storage.StorageManager
 	triggerManager *triggers.Manager
-	dataHandler    *storage.SignalDataHandler // 시그널 데이터 저장 핸들러
+	dataHandler    *storage.SignalDataHandler // 시그널 데이터 저장 핸들러 (메모리 기반)
 
 	// 상장공시 콜백 채널
 	listingCallback chan ListingSignal
@@ -64,19 +63,18 @@ type ListingCallback interface {
 	OnListingAnnouncement(signal ListingSignal)
 }
 
-// NewSignalManager 시그널 관리자 생성
+// NewSignalManager 시그널 관리자 생성 (메모리 기반)
 func NewSignalManager(
 	memManager *memory.Manager,
 	storageManager *storage.StorageManager,
 	triggerManager *triggers.Manager,
-	rawManager *raw.RawManager, // raw 데이터 관리자 추가
 	config *SignalConfig,
 ) *SignalManager {
 	sm := &SignalManager{
 		memManager:      memManager,
 		storageManager:  storageManager,
 		triggerManager:  triggerManager,
-		dataHandler:     storage.NewSignalDataHandler(storageManager, memManager, rawManager), // raw 데이터 관리자 주입
+		dataHandler:     storage.NewSignalDataHandler(storageManager, memManager), // rawManager 제거됨
 		listingCallback: make(chan ListingSignal, 100),
 		config:          config,
 	}
@@ -120,106 +118,74 @@ func (sm *SignalManager) detectPumpSignals() {
 	symbols := sm.memManager.GetSymbols()
 
 	for _, symbol := range symbols {
-		// 최근 오더북 데이터 가져오기
-		orderbooks := sm.memManager.GetRecentOrderbooks(symbol, 60) // ±60초 데이터
-		if len(orderbooks) < 10 {
+		// 최근 1초간 오더북 데이터 가져오기
+		orderbooks := sm.memManager.GetRecentOrderbooks(symbol, 1) // 1초 데이터만
+		if len(orderbooks) < 2 {
 			continue
 		}
 
-		// 최근 체결 데이터 가져오기
-		trades := sm.memManager.GetRecentTrades(symbol, 60) // ±60초 데이터
-		if len(trades) < 5 {
-			continue
-		}
+		// 1초 내 가격 변동 계산
+		priceChangePercent := sm.calculateOneSecondPriceChange(orderbooks)
 
-		// 펌핑 점수 계산
-		score := sm.calculatePumpScore(symbol, orderbooks, trades)
+		// 🎯 핵심: 1초에 +3% 이상 상승 시에만 시그널 발생 (라이브 수집용)
+		if priceChangePercent >= 3.0 {
+			// 🚨 펌핑 시그널 감지 로그 (상세 정보)
+			log.Printf("🚨 [PUMP DETECTED] %s: +%.2f%% (1초간 상승)", symbol, priceChangePercent)
 
-		// 임계값 확인
-		if score >= sm.config.PumpDetection.MinScore {
+			// 현재 가격 정보 추가
+			if len(orderbooks) > 0 && len(orderbooks[len(orderbooks)-1].Bids) > 0 && len(orderbooks[len(orderbooks)-1].Asks) > 0 {
+				currentBid, _ := parseFloat(orderbooks[len(orderbooks)-1].Bids[0][0])
+				currentAsk, _ := parseFloat(orderbooks[len(orderbooks)-1].Asks[0][0])
+				currentMid := (currentBid + currentAsk) / 2
+				log.Printf("📊 [PUMP INFO] %s: 현재가=%.8f, 매수=%.8f, 매도=%.8f",
+					symbol, currentMid, currentBid, currentAsk)
+			}
+
+			// 최근 체결 데이터 가져오기 (±60초 저장용)
+			trades := sm.memManager.GetRecentTrades(symbol, 60)
+			log.Printf("💾 [PUMP SAVE] %s: 체결 %d건 데이터 수집", symbol, len(trades))
+
 			// 펌핑 신호 생성
-			signal := sm.createPumpSignal(symbol, score, orderbooks, trades)
+			signal := sm.createSimplePumpSignal(symbol, priceChangePercent, orderbooks, trades)
 
 			// 메모리에 저장
 			sm.memManager.AddSignal(signal)
+			log.Printf("📝 [PUMP MEMORY] %s: 시그널 메모리 저장 완료", symbol)
 
 			// 스토리지에 저장 (기존 시그널 저장)
 			if err := sm.storageManager.SaveSignal(signal); err != nil {
-				log.Printf("❌ 시그널 저장 실패: %v", err)
+				log.Printf("❌ [PUMP ERROR] %s: 시그널 저장 실패 - %v", symbol, err)
+			} else {
+				log.Printf("✅ [PUMP STORAGE] %s: 시그널 파일 저장 완료", symbol)
 			}
 
-			// 🚨 핵심: 시그널 발생 시 ±60초 범위 데이터 즉시 저장
+			// 🚨 핵심: 시그널 발생 시 ±5초 범위 데이터 즉시 저장
 			if err := sm.dataHandler.SavePumpSignalData(signal); err != nil {
-				log.Printf("❌ 시그널 데이터 저장 실패: %v", err)
+				log.Printf("❌ [PUMP ERROR] %s: 데이터 저장 실패 - %v", symbol, err)
+			} else {
+				log.Printf("✅ [PUMP DATA] %s: ±5초 데이터 저장 완료", symbol)
 			}
 
 			// 트리거 발생
 			metadata := map[string]interface{}{
-				"score":      score,
-				"confidence": signal.Confidence,
-				"action":     signal.Action,
+				"price_change": priceChangePercent,
+				"confidence":   signal.Confidence,
+				"action":       signal.Action,
 			}
-			sm.triggerManager.TriggerPumpDetection(symbol, score, signal.Confidence, metadata)
+			sm.triggerManager.TriggerPumpDetection(symbol, priceChangePercent, signal.Confidence, metadata)
 
-			log.Printf("🚨 펌핑 감지: %s (점수: %.2f, 신뢰도: %.1f%%)", symbol, score, signal.Confidence)
+			log.Printf("🚨 펌핑 감지: %s (1초 상승: +%.2f%%)", symbol, priceChangePercent)
 		}
 	}
 }
 
-// calculatePumpScore 펌핑 점수 계산
-func (sm *SignalManager) calculatePumpScore(
-	symbol string,
-	orderbooks []*memory.OrderbookSnapshot,
-	trades []*memory.TradeData,
-) float64 {
-	if len(orderbooks) < 2 || len(trades) < 10 {
-		return 0
-	}
-
-	// 가격 변화율 계산
-	priceChange := sm.calculatePriceChange(orderbooks)
-
-	// 거래량 변화율 계산
-	volumeChange := sm.calculateVolumeChange(trades)
-
-	// 오더북 불균형 계산
-	imbalance := sm.calculateOrderbookImbalance(orderbooks[len(orderbooks)-1])
-
-	// 복합 점수 계산 (0-100)
-	score := 0.0
-
-	// 가격 변화 점수 (40%)
-	if priceChange > 5 {
-		priceScore := (priceChange - 5) * 2 // 5% 이상시 점수 증가
-		if priceScore > 40 {
-			priceScore = 40
-		}
-		score += priceScore
-	}
-
-	// 거래량 변화 점수 (30%)
-	if volumeChange > 100 {
-		volumeScore := (volumeChange - 100) / 10 // 100% 이상시 점수 증가
-		if volumeScore > 30 {
-			volumeScore = 30
-		}
-		score += volumeScore
-	}
-
-	// 오더북 불균형 점수 (30%)
-	imbalanceScore := imbalance * 30
-	score += imbalanceScore
-
-	return score
-}
-
-// calculatePriceChange 가격 변화율 계산
-func (sm *SignalManager) calculatePriceChange(orderbooks []*memory.OrderbookSnapshot) float64 {
+// calculateOneSecondPriceChange 1초 가격 변동율 계산
+func (sm *SignalManager) calculateOneSecondPriceChange(orderbooks []*memory.OrderbookSnapshot) float64 {
 	if len(orderbooks) < 2 {
 		return 0
 	}
 
-	// 첫 번째와 마지막 오더북의 중간가 비교
+	// 1초 전과 현재 오더북의 중간가 비교
 	first := orderbooks[0]
 	last := orderbooks[len(orderbooks)-1]
 
@@ -240,10 +206,16 @@ func (sm *SignalManager) calculatePriceChange(orderbooks []*memory.OrderbookSnap
 		return 0
 	}
 
-	return ((lastMid - firstMid) / firstMid) * 100
+	// 1초간 가격 변동율 계산 (양수만 반환)
+	changePercent := ((lastMid - firstMid) / firstMid) * 100
+	if changePercent < 0 {
+		return 0 // 하락은 무시
+	}
+
+	return changePercent
 }
 
-// calculateVolumeChange 거래량 변화율 계산
+// calculateVolumeChange 거래량 변화율 계산 (기존 메서드 유지)
 func (sm *SignalManager) calculateVolumeChange(trades []*memory.TradeData) float64 {
 	if len(trades) < 20 {
 		return 0
@@ -274,7 +246,7 @@ func (sm *SignalManager) calculateVolumeChange(trades []*memory.TradeData) float
 	return ((recentVolume - previousVolume) / previousVolume) * 100
 }
 
-// calculateOrderbookImbalance 오더북 불균형 계산
+// calculateOrderbookImbalance 오더북 불균형 계산 (기존 메서드 유지)
 func (sm *SignalManager) calculateOrderbookImbalance(orderbook *memory.OrderbookSnapshot) float64 {
 	if len(orderbook.Bids) == 0 || len(orderbook.Asks) == 0 {
 		return 0
@@ -311,10 +283,51 @@ func (sm *SignalManager) calculateOrderbookImbalance(orderbook *memory.Orderbook
 	return imbalance
 }
 
-// createPumpSignal 펌핑 시그널 생성
+// createPumpSignal 펌핑 시그널 생성 (기존 메서드를 새 메서드로 수정)
 func (sm *SignalManager) createPumpSignal(
 	symbol string,
 	score float64,
+	orderbooks []*memory.OrderbookSnapshot,
+	trades []*memory.TradeData,
+) *memory.AdvancedPumpSignal {
+	// 새로운 단순 펌핑 시그널로 리다이렉트
+	return sm.createSimplePumpSignal(symbol, score, orderbooks, trades)
+}
+
+// calculatePriceChange 가격 변화율 계산 (기존 메서드 유지)
+func (sm *SignalManager) calculatePriceChange(orderbooks []*memory.OrderbookSnapshot) float64 {
+	if len(orderbooks) < 2 {
+		return 0
+	}
+
+	// 첫 번째와 마지막 오더북의 중간가 비교
+	first := orderbooks[0]
+	last := orderbooks[len(orderbooks)-1]
+
+	if len(first.Bids) == 0 || len(first.Asks) == 0 || len(last.Bids) == 0 || len(last.Asks) == 0 {
+		return 0
+	}
+
+	// 중간가 계산
+	firstBid, _ := parseFloat(first.Bids[0][0])
+	firstAsk, _ := parseFloat(first.Asks[0][0])
+	firstMid := (firstBid + firstAsk) / 2
+
+	lastBid, _ := parseFloat(last.Bids[0][0])
+	lastAsk, _ := parseFloat(last.Asks[0][0])
+	lastMid := (lastBid + lastAsk) / 2
+
+	if firstMid == 0 {
+		return 0
+	}
+
+	return ((lastMid - firstMid) / firstMid) * 100
+}
+
+// createSimplePumpSignal 단순 펌핑 시그널 생성 (1초 가격 변동 기준)
+func (sm *SignalManager) createSimplePumpSignal(
+	symbol string,
+	priceChangePercent float64,
 	orderbooks []*memory.OrderbookSnapshot,
 	trades []*memory.TradeData,
 ) *memory.AdvancedPumpSignal {
@@ -322,11 +335,11 @@ func (sm *SignalManager) createPumpSignal(
 	pumpSignal := memory.PumpSignal{
 		Symbol:         symbol,
 		Timestamp:      time.Now(),
-		CompositeScore: score,
-		Action:         sm.determineAction(score),
-		Confidence:     sm.calculateConfidence(score),
+		CompositeScore: priceChangePercent, // 점수를 가격 변동율로 설정
+		Action:         sm.determineAction(priceChangePercent),
+		Confidence:     sm.calculateConfidence(priceChangePercent),
 		Volume:         sm.calculateVolumeChange(trades),
-		PriceChange:    sm.calculatePriceChange(orderbooks),
+		PriceChange:    priceChangePercent, // 가격 변동율 직접 저장
 	}
 
 	// 최근 10개 체결 데이터 변환
@@ -354,17 +367,9 @@ func (sm *SignalManager) createPumpSignal(
 	return advancedSignal
 }
 
-// determineAction 액션 결정
+// determineAction 액션 결정 (단순화 - 데이터 수집용)
 func (sm *SignalManager) determineAction(score float64) string {
-	if score >= 90 {
-		return "즉시매수"
-	} else if score >= 80 {
-		return "빠른매수"
-	} else if score >= 70 {
-		return "신중매수"
-	} else {
-		return "대기"
-	}
+	return "PUMP_DETECTED" // 액션 결정은 외부에서 수행
 }
 
 // calculateConfidence 신뢰도 계산

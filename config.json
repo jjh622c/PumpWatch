@@ -1,0 +1,72 @@
+{
+  "websocket": {
+    "symbols": [],
+    "worker_count": 8,
+    "buffer_size": 5000,
+    "auto_sync_symbols": true,
+    "sync_interval_minutes": 5,
+    "sync_enabled": true,
+    "enable_upbit_filter": true,
+    "upbit_sync_minutes": 30
+  },
+  "memory": {
+    "orderbook_retention_minutes": 0.5,
+    "trade_retention_minutes": 1,
+    "max_orderbooks_per_symbol": 50,
+    "max_trades_per_symbol": 100,
+    "cleanup_interval_minutes": 10
+  },
+  "signals": {
+    "pump_detection": {
+      "enabled": true,
+      "min_score": 5.0,
+      "price_change_threshold": 5.0,
+      "time_window_seconds": 1
+    },
+    "listing": {
+      "enabled": true,
+      "auto_trigger": false
+    }
+  },
+  "storage": {
+    "base_dir": "./data",
+    "retention_days": 30,
+    "compress_data": false
+  },
+  "raw_data": {
+    "base_dir": "./data/raw",
+    "buffer_size": 8192,
+    "use_compression": false,
+    "flush_interval_seconds": 5
+  },
+  "triggers": {
+    "pump_detection": {
+      "enabled": true,
+      "min_score": 5.0,
+      "price_change_threshold": 5.0,
+      "time_window_seconds": 1
+    },
+    "snapshot": {
+      "enabled": true,
+      "pre_trigger_seconds": 60,
+      "post_trigger_seconds": 60,
+      "max_snapshots_per_day": 100
+    }
+  },
+  "notification": {
+    "slack_webhook": "",
+    "telegram_token": "",
+    "telegram_chat_id": "",
+    "alert_threshold": 80
+  },
+  "logging": {
+    "level": "warning",
+    "output_file": "./logs/noticepumpcatch.log",
+    "max_size": 100,
+    "max_backups": 10,
+    "latency_warn_seconds": 2.0,
+    "latency_critical_seconds": 10.0,
+    "latency_stats_interval_seconds": 30,
+    "log_rotation_interval_minutes": 10
+  }
+} 

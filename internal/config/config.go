@@ -28,11 +28,16 @@ type ServerConfig struct {
 
 // WebSocketConfig WebSocket 연결 설정
 type WebSocketConfig struct {
-	Symbols           []string      `json:"symbols"`
-	ReconnectInterval time.Duration `json:"reconnect_interval"`
-	HeartbeatInterval time.Duration `json:"heartbeat_interval"`
-	WorkerCount       int           `json:"worker_count"`
-	BufferSize        int           `json:"buffer_size"`
+	Symbols             []string      `json:"symbols"`
+	ReconnectInterval   time.Duration `json:"reconnect_interval"`
+	HeartbeatInterval   time.Duration `json:"heartbeat_interval"`
+	WorkerCount         int           `json:"worker_count"`
+	BufferSize          int           `json:"buffer_size"`
+	AutoSyncSymbols     bool          `json:"auto_sync_symbols"`
+	SyncIntervalMinutes int           `json:"sync_interval_minutes"`
+	SyncEnabled         bool          `json:"sync_enabled"`
+	EnableUpbitFilter   bool          `json:"enable_upbit_filter"`
+	UpbitSyncMinutes    int           `json:"upbit_sync_minutes"`
 	// 자동 재연결 설정
 	MaxReconnectAttempts int           `json:"max_reconnect_attempts"` // 최대 재연결 시도 횟수
 	ReconnectBackoff     time.Duration `json:"reconnect_backoff"`      // 재연결 백오프 간격
@@ -44,11 +49,11 @@ type WebSocketConfig struct {
 
 // MemoryConfig 메모리 관리 설정
 type MemoryConfig struct {
-	OrderbookRetentionMinutes int `json:"orderbook_retention_minutes"`
-	TradeRetentionMinutes     int `json:"trade_retention_minutes"`
-	MaxOrderbooksPerSymbol    int `json:"max_orderbooks_per_symbol"`
-	MaxTradesPerSymbol        int `json:"max_trades_per_symbol"`
-	CleanupIntervalMinutes    int `json:"cleanup_interval_minutes"`
+	OrderbookRetentionMinutes float64 `json:"orderbook_retention_minutes"`
+	TradeRetentionMinutes     int     `json:"trade_retention_minutes"`
+	MaxOrderbooksPerSymbol    int     `json:"max_orderbooks_per_symbol"`
+	MaxTradesPerSymbol        int     `json:"max_trades_per_symbol"`
+	CleanupIntervalMinutes    int     `json:"cleanup_interval_minutes"`
 }
 
 // StorageConfig 스토리지 설정
@@ -111,10 +116,14 @@ type NotificationConfig struct {
 
 // LoggingConfig 로깅 설정
 type LoggingConfig struct {
-	Level      string `json:"level"`
-	OutputFile string `json:"output_file"`
-	MaxSize    int    `json:"max_size"`
-	MaxBackups int    `json:"max_backups"`
+	Level                       string  `json:"level"`
+	OutputFile                  string  `json:"output_file"`
+	MaxSize                     int     `json:"max_size"`
+	MaxBackups                  int     `json:"max_backups"`
+	LatencyWarnSeconds          float64 `json:"latency_warn_seconds"`
+	LatencyCriticalSeconds      float64 `json:"latency_critical_seconds"`
+	LatencyStatsIntervalSeconds int     `json:"latency_stats_interval_seconds"`
+	LogRotationIntervalMinutes  int     `json:"log_rotation_interval_minutes"`
 }
 
 // LoadConfig 설정 파일 로드
@@ -143,7 +152,7 @@ func LoadConfig(configPath string) (*Config, error) {
 			WriteTimeout:         10 * time.Second,
 		},
 		Memory: MemoryConfig{
-			OrderbookRetentionMinutes: 60,
+			OrderbookRetentionMinutes: 60.0,
 			TradeRetentionMinutes:     60,
 			MaxOrderbooksPerSymbol:    1000,
 			MaxTradesPerSymbol:        1000,
@@ -222,13 +231,14 @@ func (c *Config) GetSymbols() []string {
 
 // Validate 설정 유효성 검사
 func (c *Config) Validate() error {
-	if len(c.WebSocket.Symbols) == 0 {
-		return fmt.Errorf("심볼 리스트가 비어있습니다")
+	// 심볼 동기화가 비활성화된 경우에만 심볼 리스트 체크
+	if !c.WebSocket.SyncEnabled && len(c.WebSocket.Symbols) == 0 {
+		return fmt.Errorf("심볼 리스트가 비어있습니다 (심볼 동기화가 비활성화된 경우)")
 	}
 	if c.WebSocket.WorkerCount <= 0 {
 		return fmt.Errorf("워커 수는 0보다 커야 합니다")
 	}
-	if c.Memory.OrderbookRetentionMinutes <= 0 {
+	if c.Memory.OrderbookRetentionMinutes <= 0.0 {
 		return fmt.Errorf("오더북 보관 시간은 0보다 커야 합니다")
 	}
 	if c.Storage.RetentionDays <= 0 {

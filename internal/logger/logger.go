@@ -51,21 +51,27 @@ func LogLevelFromString(level string) LogLevel {
 
 // LoggerConfig 로거 설정
 type LoggerConfig struct {
-	Level      LogLevel `json:"level"`
-	OutputFile string   `json:"output_file"`
-	MaxSize    int      `json:"max_size"` // MB
-	MaxBackups int      `json:"max_backups"`
+	Level                       LogLevel `json:"level"`
+	OutputFile                  string   `json:"output_file"`
+	MaxSize                     int      `json:"max_size"` // MB
+	MaxBackups                  int      `json:"max_backups"`
+	LatencyWarnSeconds          float64  `json:"latency_warn_seconds"`
+	LatencyCriticalSeconds      float64  `json:"latency_critical_seconds"`
+	LatencyStatsIntervalSeconds int      `json:"latency_stats_interval_seconds"`
+	LogRotationIntervalMinutes  int      `json:"log_rotation_interval_minutes"`
 }
 
 // Logger 로거 구조체
 type Logger struct {
-	config         LoggerConfig
-	file           *os.File
-	fileLogger     *log.Logger
-	consoleLogger  *log.Logger
-	mu             sync.Mutex
-	lastStatus     time.Time
-	statusInterval time.Duration
+	config           LoggerConfig
+	file             *os.File
+	fileLogger       *log.Logger
+	consoleLogger    *log.Logger
+	mu               sync.Mutex
+	lastStatus       time.Time
+	statusInterval   time.Duration
+	lastRotation     time.Time
+	rotationInterval time.Duration
 }
 
 // NewLogger 새 로거 생성
@@ -86,12 +92,14 @@ func NewLogger(config LoggerConfig) (*Logger, error) {
 	multiWriter := io.MultiWriter(os.Stdout, file)
 
 	logger := &Logger{
-		config:         config,
-		file:           file,
-		fileLogger:     log.New(file, "", log.LstdFlags),
-		consoleLogger:  log.New(multiWriter, "", log.LstdFlags),
-		lastStatus:     time.Now(),
-		statusInterval: 30 * time.Second,
+		config:           config,
+		file:             file,
+		fileLogger:       log.New(file, "", log.LstdFlags),
+		consoleLogger:    log.New(multiWriter, "", log.LstdFlags),
+		lastStatus:       time.Now(),
+		statusInterval:   30 * time.Second,
+		lastRotation:     time.Now(),
+		rotationInterval: time.Duration(config.LogRotationIntervalMinutes) * time.Minute,
 	}
 
 	return logger, nil
@@ -102,6 +110,9 @@ func (l *Logger) log(level LogLevel, format string, args ...interface{}) {
 	if level < l.config.Level {
 		return
 	}
+
+	// 시간 기반 로그 롤링 확인
+	l.checkTimeBasedRotation()
 
 	levelStr := LogLevelString[level]
 	timestamp := time.Now().Format("2006/01/02 15:04:05")
@@ -223,6 +234,21 @@ func (l *Logger) LogGoodbye(format string, args ...interface{}) {
 	l.log(INFO, format, args...)
 }
 
+// LogLatency 지연 감지 로그
+func (l *Logger) LogLatency(format string, args ...interface{}) {
+	l.log(WARNING, format, args...)
+}
+
+// LogLatencyStats 지연 통계 로그
+func (l *Logger) LogLatencyStats(format string, args ...interface{}) {
+	l.log(INFO, format, args...)
+}
+
+// LogLatencyCritical 심각한 지연 로그
+func (l *Logger) LogLatencyCritical(format string, args ...interface{}) {
+	l.log(CRITICAL, format, args...)
+}
+
 // PrintStatusSummary 상태 요약 출력 (콘솔 전용)
 func (l *Logger) PrintStatusSummary(stats map[string]interface{}) {
 	now := time.Now()
@@ -270,7 +296,46 @@ func (l *Logger) Close() error {
 	return nil
 }
 
-// Rotate 로그 파일 로테이션
+// checkTimeBasedRotation 시간 기반 로그 롤링 확인
+func (l *Logger) checkTimeBasedRotation() {
+	now := time.Now()
+	if now.Sub(l.lastRotation) >= l.rotationInterval {
+		l.rotateByTime()
+		l.lastRotation = now
+	}
+}
+
+// rotateByTime 시간 기반 로그 롤링 수행
+func (l *Logger) rotateByTime() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	// 현재 파일 닫기
+	if l.file != nil {
+		l.file.Close()
+	}
+
+	// 타임스탬프가 포함된 백업 파일명 생성
+	timestamp := time.Now().Format("20060102_150405")
+	backupPath := fmt.Sprintf("%s.%s", l.config.OutputFile, timestamp)
+
+	// 기존 파일을 백업으로 이동
+	if err := os.Rename(l.config.OutputFile, backupPath); err != nil {
+		// 파일이 없거나 이동 실패시 무시
+		return
+	}
+
+	// 새 파일 열기
+	file, err := os.OpenFile(l.config.OutputFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		return
+	}
+
+	l.file = file
+	l.fileLogger = log.New(file, "", log.LstdFlags)
+}
+
+// Rotate 로그 파일 로테이션 (크기 기반)
 func (l *Logger) Rotate() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()

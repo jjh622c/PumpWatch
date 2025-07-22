@@ -2,20 +2,24 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
+	"noticepumpcatch/internal/cache"
 	"noticepumpcatch/internal/callback"
 	"noticepumpcatch/internal/config"
+	"noticepumpcatch/internal/latency"
 	"noticepumpcatch/internal/logger"
 	"noticepumpcatch/internal/memory"
 	"noticepumpcatch/internal/monitor"
-	"noticepumpcatch/internal/raw"
 	"noticepumpcatch/internal/signals"
 	"noticepumpcatch/internal/storage"
+	syncmodule "noticepumpcatch/internal/sync"
 	"noticepumpcatch/internal/triggers"
 	"noticepumpcatch/internal/websocket"
 )
@@ -25,12 +29,14 @@ type Application struct {
 	config          *config.Config
 	logger          *logger.Logger
 	memManager      *memory.Manager
-	rawManager      *raw.RawManager // raw 데이터 관리자 추가
+	cacheManager    *cache.CacheManager // 새 캐시 매니저 추가
 	storageManager  *storage.StorageManager
 	signalManager   *signals.SignalManager
 	triggerManager  *triggers.Manager
 	callbackManager *callback.CallbackManager
 	websocket       *websocket.BinanceWebSocket
+	latencyMonitor  *latency.LatencyMonitor
+	symbolSyncer    *syncmodule.SymbolSyncManager
 	perfMonitor     *monitor.PerformanceMonitor
 
 	ctx    context.Context
@@ -55,19 +61,28 @@ func (app *Application) Initialize() error {
 	app.memManager = memory.NewManager(
 		app.config.Memory.MaxOrderbooksPerSymbol,
 		app.config.Memory.MaxTradesPerSymbol,
-		1000, // 최대 시그널 수
-		app.config.Memory.OrderbookRetentionMinutes,
+		1000,                                        // 최대 시그널 수
+		app.config.Memory.TradeRetentionMinutes,     // 체결 데이터 보존 시간
+		app.config.Memory.OrderbookRetentionMinutes, // 오더북 데이터 보존 시간 (0.1분 = 6초)
 	)
 	app.logger.LogSuccess("메모리 관리자 생성 완료")
 
-	// 🚨 핵심: raw 데이터 관리자 생성
-	app.rawManager = raw.NewRawManager(
-		"data/raw",     // raw 데이터 저장 경로
-		8192,           // 버퍼 크기 (8KB)
-		false,          // 압축 사용 안함 (성능 우선)
-		app.memManager, // 메모리 관리자 주입
+	// 🚨 핵심: 캐시 매니저 생성 (raw 데이터 관리자 대체)
+	var err error
+	app.cacheManager, err = cache.NewCacheManager()
+	if err != nil {
+		app.logger.LogCritical("캐시 매니저 생성 실패: %v", err)
+		return fmt.Errorf("캐시 매니저 생성 실패: %v", err)
+	}
+	app.logger.LogSuccess("캐시 매니저 생성 완료")
+
+	// 지연 모니터링 생성
+	app.latencyMonitor = latency.NewLatencyMonitor(
+		2.0,  // 2초 이상 경고
+		10.0, // 10초 이상 심각
+		300,  // 5분(300초)마다 통계
 	)
-	app.logger.LogSuccess("raw 데이터 관리자 생성 완료")
+	app.logger.LogSuccess("지연 모니터링 생성 완료")
 
 	// 스토리지 관리자 생성
 	storageConfig := &storage.StorageConfig{
@@ -100,7 +115,7 @@ func (app *Application) Initialize() error {
 	app.callbackManager = callback.NewCallbackManager()
 	app.logger.LogSuccess("콜백 관리자 생성 완료")
 
-	// 시그널 관리자 생성
+	// 시그널 관리자 생성 (메모리 기반)
 	signalConfig := &signals.SignalConfig{
 		PumpDetection: signals.PumpDetectionConfig{
 			Enabled:              app.config.Signals.PumpDetection.Enabled,
@@ -118,22 +133,42 @@ func (app *Application) Initialize() error {
 		app.memManager,
 		app.storageManager,
 		app.triggerManager,
-		app.rawManager, // raw 데이터 관리자 주입
-		signalConfig,
+		signalConfig, // rawManager 제거됨
 	)
-	app.logger.LogSuccess("시그널 관리자 생성 완료")
+	app.logger.LogSuccess("시그널 관리자 생성 완료 (메모리 기반)")
 
-	// WebSocket 클라이언트 생성
-	app.websocket = websocket.NewBinanceWebSocket(
-		app.config.GetSymbols(),
+	// WebSocket 클라이언트 생성 (심볼 동기화 활성화시 건너뛰기)
+	if !app.config.WebSocket.SyncEnabled {
+		app.websocket = websocket.NewBinanceWebSocket(
+			app.config.GetSymbols(),
+			app.memManager,
+			app.cacheManager, // 캐시 매니저 주입
+			app.logger,       // 로거 주입
+			app.config.WebSocket.WorkerCount,
+			app.config.WebSocket.BufferSize,
+			app.latencyMonitor,
+		)
+		app.logger.LogSuccess("WebSocket 클라이언트 생성 완료")
+	} else {
+		app.logger.LogInfo("심볼 동기화 활성화 - WebSocket 생성을 나중에 진행")
+	}
+
+	// 심볼 동기화 관리자 생성 🚀 중요!
+	syncConfig := &syncmodule.Config{
+		AutoSyncSymbols:     app.config.WebSocket.AutoSyncSymbols,
+		SyncIntervalMinutes: app.config.WebSocket.SyncIntervalMinutes,
+		SyncEnabled:         app.config.WebSocket.SyncEnabled,
+		EnableUpbitFilter:   app.config.WebSocket.EnableUpbitFilter,
+		UpbitSyncMinutes:    app.config.WebSocket.UpbitSyncMinutes,
+	}
+	app.symbolSyncer = syncmodule.NewSymbolSyncManager(
+		syncConfig,
+		app.logger,
 		app.memManager,
-		app.rawManager, // raw 데이터 관리자 주입
-		app.logger,     // 로거 주입
-		app.config.WebSocket.WorkerCount,
-		app.config.WebSocket.BufferSize,
-		nil, // 재연결 설정 제거
+		app.websocket,
+		app.latencyMonitor,
 	)
-	app.logger.LogSuccess("WebSocket 클라이언트 생성 완료")
+	app.logger.LogSuccess("심볼 동기화 관리자 생성 완료")
 
 	// 성능 모니터 생성
 	app.perfMonitor = monitor.NewPerformanceMonitor()
@@ -147,13 +182,71 @@ func (app *Application) Initialize() error {
 func (app *Application) Start() error {
 	app.logger.LogInfo("애플리케이션 시작")
 
-	// WebSocket 연결
+	// 심볼 동기화 시작 🚀 중요!
+	if app.config.WebSocket.SyncEnabled {
+		app.logger.LogInfo("심볼 동기화 시작...")
+		if err := app.symbolSyncer.Start(); err != nil {
+			app.logger.LogError("심볼 동기화 시작 실패: %v", err)
+			return fmt.Errorf("심볼 동기화 시작 실패: %v", err)
+		}
+		app.logger.LogSuccess("심볼 동기화 시작 완료")
+
+		// 심볼 동기화 완료 대기 (5초)
+		app.logger.LogInfo("심볼 동기화 완료 대기 중...")
+		time.Sleep(5 * time.Second)
+
+		// 동기화된 심볼 목록 가져오기
+		syncedSymbols := app.symbolSyncer.GetFilteredSymbols()
+		app.logger.LogInfo("🔍 심볼 동기화 결과 확인: %d개 심볼 발견", len(syncedSymbols))
+
+		if len(syncedSymbols) > 0 {
+			app.logger.LogInfo("✅ 동기화된 심볼 개수: %d개", len(syncedSymbols))
+
+			// 🚨 기존 WebSocket 인스턴스가 있으면 완전히 정리
+			if app.websocket != nil {
+				app.logger.LogConnection("🔴 기존 WebSocket 연결 해제 및 정리 중...")
+				app.websocket.Disconnect()
+				app.websocket = nil
+				app.logger.LogConnection("✅ 기존 WebSocket 정리 완료")
+				// 고루틴 정리를 위한 잠시 대기
+				time.Sleep(100 * time.Millisecond)
+			}
+
+			app.logger.LogConnection("🔧 동기화된 심볼로 WebSocket 클라이언트 생성 시작...")
+			// 동기화된 심볼로 WebSocket 클라이언트 생성
+			app.websocket = websocket.NewBinanceWebSocket(
+				syncedSymbols, // 동기화된 심볼 사용
+				app.memManager,
+				app.cacheManager,
+				app.logger,
+				app.config.WebSocket.WorkerCount,
+				app.config.WebSocket.BufferSize,
+				app.latencyMonitor,
+			)
+			app.logger.LogSuccess("✅ WebSocket 클라이언트 생성 완료 (%d개 심볼)", len(syncedSymbols))
+		} else {
+			app.logger.LogError("⚠️  동기화된 심볼이 없음 - 시스템 중단")
+			return fmt.Errorf("동기화된 심볼이 없습니다")
+		}
+	} else {
+		app.logger.LogInfo("심볼 동기화가 비활성화됨 - 설정 파일의 심볼 사용")
+	}
+
+	// WebSocket 연결 (동기화 여부와 관계없이 app.websocket이 설정된 후 실행)
+	if app.websocket == nil {
+		return fmt.Errorf("WebSocket 클라이언트가 초기화되지 않았습니다")
+	}
+
 	app.logger.LogConnection("WebSocket 연결 시도 중...")
 	if err := app.websocket.Connect(app.ctx); err != nil {
 		app.logger.LogError("WebSocket 연결 실패: %v", err)
 		return err
 	}
 	app.logger.LogSuccess("WebSocket 연결 성공")
+
+	// 시그널 감지 시작
+	app.signalManager.Start()
+	app.logger.LogSuccess("시그널 감지 시작")
 
 	// 시스템 모니터링 시작
 	go app.monitorSystem()
@@ -169,16 +262,22 @@ func (app *Application) Stop() error {
 	// 컨텍스트 취소
 	app.cancel()
 
+	// 심볼 동기화 중지
+	if app.symbolSyncer != nil {
+		app.symbolSyncer.Stop()
+		app.logger.LogConnection("심볼 동기화 중지")
+	}
+
 	// WebSocket 연결 해제
 	if app.websocket != nil {
 		app.websocket.Disconnect()
 		app.logger.LogConnection("바이낸스 WebSocket 연결 해제")
 	}
 
-	// raw 데이터 관리자 닫기
-	if app.rawManager != nil {
-		app.rawManager.Close()
-		app.logger.LogFile("raw 데이터 관리자 닫기")
+	// 캐시 매니저 닫기
+	if app.cacheManager != nil {
+		app.cacheManager.Close()
+		app.logger.LogFile("캐시 매니저 닫기")
 	}
 
 	// 로거 닫기
@@ -262,6 +361,18 @@ func (app *Application) TriggerListingSignal(symbol, exchange, source string, co
 }
 
 func main() {
+	// 🛡️ 패닉 복구 메커니즘 설정
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("🚨 [PANIC RECOVERY] 시스템 패닉 발생: %v", r)
+			log.Printf("🔄 [PANIC RECOVERY] 시스템 재시작을 권장합니다")
+
+			// 10초 대기 후 종료 (재시작 가능하도록)
+			time.Sleep(10 * time.Second)
+			os.Exit(1)
+		}
+	}()
+
 	log.Printf("🚀 NoticePumpCatch 시스템 시작")
 
 	// 설정 로드
@@ -317,10 +428,26 @@ func main() {
 	// 메인 루프
 	appLogger.LogInfo("시스템 실행 중... (Ctrl+C로 종료)")
 
-	// 상장공시 테스트 (5초 후)
+	// 상장공시 테스트 제거 (시그널1 미사용)
+	// go func() {
+	//	time.Sleep(5 * time.Second)
+	//	app.TriggerListingSignal("TESTUSDT", "binance", "manual_test", 95.0)
+	// }()
+
+	// 시스템 준비 완료
+	app.logger.LogSuccess("✅ 시스템 준비 완료! Ctrl+C로 종료")
+
+	// 🔍 시스템 모니터링 시작 (장시간 실행용)
+	go app.startSystemMonitoring()
+
+	// 상태 요약 출력 주기적 실행
+	statsTicker := time.NewTicker(30 * time.Second)
+	defer statsTicker.Stop()
+
 	go func() {
-		time.Sleep(5 * time.Second)
-		app.TriggerListingSignal("TESTUSDT", "binance", "manual_test", 95.0)
+		for range statsTicker.C {
+			app.printSystemStats()
+		}
 	}()
 
 	for {
@@ -333,5 +460,129 @@ func main() {
 			appLogger.LogConnection("컨텍스트 종료")
 			return
 		}
+	}
+}
+
+// startSystemMonitoring 시스템 모니터링 시작 (장시간 실행용)
+func (app *Application) startSystemMonitoring() {
+	app.logger.LogInfo("🔍 시스템 모니터링 시작 (5분 간격)")
+
+	ticker := time.NewTicker(5 * time.Minute) // 5분마다 체크
+	defer ticker.Stop()
+
+	lastDataTime := time.Now()
+
+	for {
+		select {
+		case <-ticker.C:
+			app.performSystemHealthCheck(&lastDataTime)
+		}
+	}
+}
+
+// performSystemHealthCheck 시스템 상태 체크
+func (app *Application) performSystemHealthCheck(lastDataTime *time.Time) {
+	// 🛡️ 패닉 복구로 감싸기
+	defer func() {
+		if r := recover(); r != nil {
+			app.logger.LogError("🚨 [HEALTH CHECK PANIC] 모니터링 중 패닉 발생: %v", r)
+		}
+	}()
+
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
+	heapMB := float64(m.HeapInuse) / 1024 / 1024
+	goroutines := runtime.NumGoroutine()
+	gcRuns := m.NumGC
+
+	// 📊 기본 상태 로그 (더 상세한 정보)
+	app.logger.LogInfo("🔍 [HEALTH] 힙=%.1fMB, 고루틴=%d개, GC실행=%d회",
+		heapMB, goroutines, gcRuns)
+
+	// ⚠️ 메모리 사용량 경고 (2GB 이상)
+	if heapMB > 2048 {
+		app.logger.LogError("🚨 [MEMORY ALERT] 메모리 사용량 과다: %.1fMB (임계치: 2048MB)", heapMB)
+
+		// 강제 GC 실행
+		runtime.GC()
+		app.logger.LogInfo("🗑️ [MEMORY] 강제 GC 실행")
+	}
+
+	// ⚠️ 고루틴 수 경고 (50개 이상)
+	if goroutines > 50 {
+		app.logger.LogError("🚨 [GOROUTINE ALERT] 고루틴 수 과다: %d개 (임계치: 50개)", goroutines)
+	}
+
+	// 📡 WebSocket 연결 상태 체크
+	if app.websocket != nil {
+		symbols := app.memManager.GetSymbols()
+		app.logger.LogInfo("📡 [WEBSOCKET] 상태: 연결됨, 심볼=%d개", len(symbols))
+
+		// 🔍 데이터 수집 상태 체크 (여러 심볼 확인)
+		if len(symbols) > 0 {
+			activeSymbols := 0
+
+			// 처음 5개 심볼을 체크
+			checkCount := 5
+			if len(symbols) < checkCount {
+				checkCount = len(symbols)
+			}
+
+			for i := 0; i < checkCount; i++ {
+				symbol := symbols[i]
+				recentTrades := app.memManager.GetRecentTrades(symbol, 1)         // 1분
+				recentOrderbooks := app.memManager.GetRecentOrderbooks(symbol, 1) // 1분
+
+				if len(recentTrades) > 0 || len(recentOrderbooks) > 0 {
+					activeSymbols++
+				}
+			}
+
+			if activeSymbols > 0 {
+				*lastDataTime = time.Now()
+				app.logger.LogInfo("✅ [DATA] 수집 정상: %d/%d 심볼 활성", activeSymbols, checkCount)
+			} else {
+				timeSinceLastData := time.Since(*lastDataTime)
+				if timeSinceLastData > 5*time.Minute {
+					app.logger.LogError("🚨 [DATA ALERT] 수집 중단 감지: %.1f분간 데이터 없음",
+						timeSinceLastData.Minutes())
+
+					// TODO: 자동 재연결 로직 추가 가능
+					app.logger.LogInfo("🔄 [AUTO RECOVERY] WebSocket 재연결이 필요할 수 있습니다")
+				}
+			}
+		}
+	} else {
+		app.logger.LogError("🚨 [WEBSOCKET ALERT] 연결 끊어짐")
+	}
+
+	// 🗂️ 저장된 시그널 수 확인
+	signals := app.memManager.GetRecentSignals(100)
+	if len(signals) > 0 {
+		app.logger.LogInfo("📈 [SIGNALS] %d개 시그널 저장됨 (최근 100개 기준)", len(signals))
+	} else {
+		app.logger.LogInfo("📈 [SIGNALS] 저장된 시그널 없음")
+	}
+
+	// 📁 디스크 공간 체크
+	app.checkDiskSpace()
+}
+
+// checkDiskSpace 디스크 공간 체크
+func (app *Application) checkDiskSpace() {
+	defer func() {
+		if r := recover(); r != nil {
+			app.logger.LogError("🚨 [DISK CHECK PANIC] 디스크 체크 중 패닉: %v", r)
+		}
+	}()
+
+	// 간단한 파일 생성 테스트로 디스크 상태 확인
+	testFile := "data/test_write.tmp"
+	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+		app.logger.LogError("🚨 [DISK ALERT] 디스크 쓰기 실패: %v", err)
+	} else {
+		os.Remove(testFile) // 테스트 파일 삭제
+		app.logger.LogInfo("💾 [DISK] 쓰기 가능 상태")
 	}
 }

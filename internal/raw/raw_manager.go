@@ -46,11 +46,15 @@ type OrderbookRecord struct {
 
 // NewRawManager raw 데이터 관리자 생성
 func NewRawManager(baseDir string, bufferSize int, useCompression bool, memManager *memory.Manager) *RawManager {
-	// 새로운 파일 매니저 생성 (100MB 제한)
+	// 새로운 파일 매니저 생성 (100MB 제한, 버퍼 최적화)
+	optimizedBufferSize := bufferSize * 4 // 4배 증가
+	if optimizedBufferSize < 32768 {
+		optimizedBufferSize = 32768 // 최소 32KB
+	}
 	fileManager := filemanager.NewFileManager(
 		baseDir,
 		100*1024*1024, // 100MB
-		bufferSize,
+		optimizedBufferSize,
 		useCompression,
 	)
 

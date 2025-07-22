@@ -11,18 +11,19 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"noticepumpcatch/internal/cache"
+	"noticepumpcatch/internal/latency"
 	"noticepumpcatch/internal/logger"
 	"noticepumpcatch/internal/memory"
-	"noticepumpcatch/internal/raw"
 )
 
 // BinanceWebSocket 바이낸스 WebSocket 클라이언트
 type BinanceWebSocket struct {
 	symbols      []string
-	memManager   *memory.Manager
-	rawManager   *raw.RawManager // raw 데이터 관리자 추가
-	logger       *logger.Logger  // 로거 추가
-	conn         *websocket.Conn
+	memManager   *memory.Manager     // 기존 메모리 매니저 (통계용)
+	cacheManager *cache.CacheManager // 새 캐시 매니저 (실제 데이터 저장)
+	logger       *logger.Logger      // 로거 추가
+	connections  []*websocket.Conn   // 다중 연결 지원
 	dataChannel  chan OrderbookData
 	tradeChannel chan TradeData
 	workerCount  int
@@ -31,6 +32,20 @@ type BinanceWebSocket struct {
 	isConnected  bool
 	ctx          context.Context
 	cancel       context.CancelFunc
+	wg           sync.WaitGroup
+
+	// 지연 모니터링
+	latencyMonitor *latency.LatencyMonitor
+
+	// 배치 통계 (성능 최적화)
+	batchStats struct {
+		mu             sync.Mutex
+		orderbookCount int64
+		tradeCount     int64
+		symbolStats    map[string]int64 // 심볼별 처리 건수
+		lastReport     time.Time
+		reportInterval time.Duration
+	}
 }
 
 // OrderbookData 오더북 데이터
@@ -45,24 +60,38 @@ type TradeData struct {
 	Data   map[string]interface{} `json:"data"`
 }
 
-// NewBinanceWebSocket 바이낸스 WebSocket 클라이언트 생성
-func NewBinanceWebSocket(symbols []string, memManager *memory.Manager, rawManager *raw.RawManager, logger *logger.Logger, workerCount, bufferSize int, reconnectConfig map[string]interface{}) *BinanceWebSocket {
+// NewBinanceWebSocket 새 바이낸스 WebSocket 클라이언트 생성
+func NewBinanceWebSocket(
+	symbols []string,
+	memManager *memory.Manager,
+	cacheManager *cache.CacheManager, // cacheManager로 변경
+	logger *logger.Logger,
+	workerCount int,
+	bufferSize int,
+	latencyMonitor *latency.LatencyMonitor,
+) *BinanceWebSocket {
 	ctx, cancel := context.WithCancel(context.Background())
-
-	return &BinanceWebSocket{
-		symbols:      symbols,
-		memManager:   memManager,
-		rawManager:   rawManager, // raw 데이터 관리자 주입
-		logger:       logger,     // 로거 주입
-		dataChannel:  make(chan OrderbookData, bufferSize),
-		tradeChannel: make(chan TradeData, bufferSize),
-		workerCount:  workerCount,
-		bufferSize:   bufferSize,
-		ctx:          ctx,
-		cancel:       cancel,
-		mu:           sync.RWMutex{},
-		isConnected:  false,
+	bws := &BinanceWebSocket{
+		symbols:        symbols,
+		memManager:     memManager,
+		cacheManager:   cacheManager, // 제대로 설정
+		logger:         logger,       // 로거 주입
+		dataChannel:    make(chan OrderbookData, bufferSize),
+		tradeChannel:   make(chan TradeData, bufferSize),
+		workerCount:    workerCount,
+		bufferSize:     bufferSize,
+		ctx:            ctx,
+		cancel:         cancel,
+		latencyMonitor: latencyMonitor,
 	}
+
+	// 배치 통계 초기화
+	bws.batchStats.symbolStats = make(map[string]int64)
+	bws.batchStats.lastReport = time.Now()
+	bws.batchStats.reportInterval = 60 * time.Second // 1분마다 보고로 변경
+	go bws.symbolCountReportRoutine()                // 심볼 개수 보고 고루틴 시작 (배치 통계 대신)
+
+	return bws
 }
 
 // Connect WebSocket 연결
@@ -111,9 +140,13 @@ func (bws *BinanceWebSocket) Disconnect() error {
 
 	bws.cancel()
 
-	if bws.conn != nil {
-		bws.conn.Close()
+	// 모든 연결 해제
+	for _, conn := range bws.connections {
+		if conn != nil {
+			conn.Close()
+		}
 	}
+	bws.connections = nil
 
 	bws.isConnected = false
 
@@ -127,7 +160,9 @@ func (bws *BinanceWebSocket) Disconnect() error {
 
 // createStreamGroups 스트림 그룹 생성
 func (bws *BinanceWebSocket) createStreamGroups() [][]string {
-	const maxStreamsPerGroup = 200 // 바이낸스 제한
+	// 바이낸스 제한: 최대 200개 스트림/연결
+	// 심볼당 2개 스트림(orderbook + trade)이므로 심볼 기준으로는 100개/그룹
+	const maxSymbolsPerGroup = 100 // 200 스트림 ÷ 2 = 100 심볼
 
 	var groups [][]string
 	var currentGroup []string
@@ -135,7 +170,7 @@ func (bws *BinanceWebSocket) createStreamGroups() [][]string {
 	for _, symbol := range bws.symbols {
 		currentGroup = append(currentGroup, symbol)
 
-		if len(currentGroup) >= maxStreamsPerGroup {
+		if len(currentGroup) >= maxSymbolsPerGroup {
 			groups = append(groups, currentGroup)
 			currentGroup = []string{}
 		}
@@ -143,6 +178,13 @@ func (bws *BinanceWebSocket) createStreamGroups() [][]string {
 
 	if len(currentGroup) > 0 {
 		groups = append(groups, currentGroup)
+	}
+
+	if bws.logger != nil {
+		bws.logger.LogInfo("WebSocket 그룹 생성: %d개 그룹, 총 %d개 심볼", len(groups), len(bws.symbols))
+		for i, group := range groups {
+			bws.logger.LogInfo("그룹 %d: %d개 심볼 (%d개 스트림)", i+1, len(group), len(group)*2)
+		}
 	}
 
 	return groups
@@ -200,30 +242,32 @@ func (bws *BinanceWebSocket) connectToGroup(ctx context.Context, group []string,
 	// 연결 설정 간소화
 	conn.SetReadLimit(1024 * 1024) // 1MB
 
-	// 단순하게 연결 정보만 저장
-	bws.conn = conn
+	// 다중 연결 목록에 추가
+	bws.mu.Lock()
+	bws.connections = append(bws.connections, conn)
 	bws.isConnected = true
+	bws.mu.Unlock()
 
-	// 메시지 처리 고루틴 시작
-	go bws.handleMessages(ctx)
+	// 메시지 처리 고루틴 시작 (각 연결마다)
+	go bws.handleMessages(ctx, conn, groupIndex)
 
 	return nil
 }
 
-// handleMessages 메시지 처리
-func (bws *BinanceWebSocket) handleMessages(ctx context.Context) {
-	log.Printf("🚀 메시지 처리 고루틴 시작")
+// handleMessages 메시지 처리 (각 연결별)
+func (bws *BinanceWebSocket) handleMessages(ctx context.Context, conn *websocket.Conn, groupIndex int) {
+	log.Printf("🚀 메시지 처리 고루틴 시작 (그룹 %d)", groupIndex)
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("🔴 WebSocket 연결 종료")
+			log.Printf("🔴 WebSocket 연결 종료 (그룹 %d)", groupIndex)
 			return
 		default:
 			var msg map[string]interface{}
-			err := bws.conn.ReadJSON(&msg)
+			err := conn.ReadJSON(&msg)
 			if err != nil {
-				log.Printf("❌ 메시지 수신 오류: %v", err)
+				log.Printf("❌ 메시지 수신 오류 (그룹 %d): %v", groupIndex, err)
 				return
 			}
 
@@ -293,8 +337,6 @@ func (bws *BinanceWebSocket) startWorkerPool() {
 		go bws.orderbookWorker(i)
 		if bws.logger != nil {
 			bws.logger.LogConnection("오더북 워커 %d 시작", i)
-		} else {
-			log.Printf("📊 오더북 워커 %d 시작", i)
 		}
 	}
 
@@ -303,8 +345,6 @@ func (bws *BinanceWebSocket) startWorkerPool() {
 		go bws.tradeWorker(i)
 		if bws.logger != nil {
 			bws.logger.LogConnection("체결 워커 %d 시작", i)
-		} else {
-			log.Printf("💰 체결 워커 %d 시작", i)
 		}
 	}
 
@@ -345,11 +385,30 @@ func (bws *BinanceWebSocket) processOrderbookData(stream string, data map[string
 	symbol := strings.Replace(stream, "@depth20@100ms", "", 1)
 	symbol = strings.ToUpper(symbol)
 
-	if bws.logger != nil {
-		bws.logger.LogDebug("오더북 데이터 처리: %s -> %s", stream, symbol)
-	} else {
-		log.Printf("📊 오더북 데이터 처리: %s -> %s", stream, symbol)
+	// 지연 모니터링
+	if bws.latencyMonitor != nil {
+		// EventTime 추출 (밀리초 단위)
+		if eventTimeRaw, ok := data["E"].(float64); ok {
+			eventTime := time.Unix(0, int64(eventTimeRaw)*int64(time.Millisecond))
+			latency, isWarning := bws.latencyMonitor.RecordLatency(
+				symbol,
+				"orderbook",
+				eventTime,
+				time.Now(),
+			)
+
+			if isWarning {
+				bws.logger.LogLatency("밀림 감지: symbol=%s, type=orderbook, 거래소 timestamp=%s, 수신 timestamp=%s, latency=%.2f초",
+					symbol,
+					eventTime.Format("15:04:05.000"),
+					time.Now().Format("15:04:05.000"),
+					latency,
+				)
+			}
+		}
 	}
+
+	// 디버그 로그는 배치 통계로 대체됨 (성능 최적화)
 
 	// 오더북 데이터 파싱 (디버깅)
 	if bws.logger != nil {
@@ -427,17 +486,20 @@ func (bws *BinanceWebSocket) processOrderbookData(stream string, data map[string
 		Asks:      asksStr,
 	}
 
-	// 메모리 관리자에 저장
-	bws.memManager.AddOrderbook(snapshot)
-
-	// 🚨 핵심: raw 데이터에 실시간 기록
-	if err := bws.rawManager.RecordOrderbook(symbol, "binance", bidsStr, asksStr, time.Now()); err != nil {
-		if bws.logger != nil {
-			bws.logger.LogError("raw 오더북 기록 실패: %s - %v", symbol, err)
-		} else {
-			log.Printf("❌ raw 오더북 기록 실패: %s - %v", symbol, err)
+	// 캐시 매니저에 저장 (있을 때만)
+	if bws.cacheManager != nil {
+		if err := bws.cacheManager.AddOrderbook(snapshot); err != nil {
+			if bws.logger != nil {
+				bws.logger.LogError("캐시 오더북 저장 실패: %s - %v", symbol, err)
+			}
 		}
 	}
+
+	// 기존 메모리 매니저에도 저장 (통계용)
+	bws.memManager.AddOrderbook(snapshot)
+
+	// 배치 통계에 추가 (개별 로그 대신)
+	// bws.addBatchStats(symbol, "orderbook") // 파일 저장 안하므로 통계 불필요
 }
 
 // processTradeData 체결 데이터 처리
@@ -446,11 +508,30 @@ func (bws *BinanceWebSocket) processTradeData(stream string, data map[string]int
 	symbol := strings.Replace(stream, "@trade", "", 1)
 	symbol = strings.ToUpper(symbol)
 
-	if bws.logger != nil {
-		bws.logger.LogDebug("체결 데이터 처리: %s -> %s", stream, symbol)
-	} else {
-		log.Printf("💰 체결 데이터 처리: %s -> %s", stream, symbol)
+	// 지연 모니터링
+	if bws.latencyMonitor != nil {
+		// EventTime 추출 (밀리초 단위)
+		if eventTimeRaw, ok := data["E"].(float64); ok {
+			eventTime := time.Unix(0, int64(eventTimeRaw)*int64(time.Millisecond))
+			latency, isWarning := bws.latencyMonitor.RecordLatency(
+				symbol,
+				"trade",
+				eventTime,
+				time.Now(),
+			)
+
+			if isWarning {
+				bws.logger.LogLatency("밀림 감지: symbol=%s, type=trade, 거래소 timestamp=%s, 수신 timestamp=%s, latency=%.2f초",
+					symbol,
+					eventTime.Format("15:04:05.000"),
+					time.Now().Format("15:04:05.000"),
+					latency,
+				)
+			}
+		}
 	}
+
+	// 디버그 로그는 배치 통계로 대체됨 (성능 최적화)
 
 	// 체결 데이터 파싱
 	price, ok := data["p"].(string)
@@ -501,22 +582,51 @@ func (bws *BinanceWebSocket) processTradeData(stream string, data map[string]int
 		TradeID:   strconv.FormatInt(int64(tradeID), 10),
 	}
 
-	// 메모리 관리자에 저장
-	bws.memManager.AddTrade(trade)
-
-	// 🚨 핵심: raw 데이터에 실시간 기록
-	if err := bws.rawManager.RecordTrade(symbol, price, quantity, sideStr, strconv.FormatInt(int64(tradeID), 10), "binance", time.Unix(0, int64(timestampMs)*int64(time.Millisecond))); err != nil {
-		if bws.logger != nil {
-			bws.logger.LogError("raw 체결 기록 실패: %s - %v", symbol, err)
-		} else {
-			log.Printf("❌ raw 체결 기록 실패: %s - %v", symbol, err)
+	// 캐시 매니저에 저장 (있을 때만)
+	if bws.cacheManager != nil {
+		if err := bws.cacheManager.AddTrade(trade); err != nil {
+			if bws.logger != nil {
+				bws.logger.LogError("캐시 체결 저장 실패: %s - %v", symbol, err)
+			}
 		}
 	}
 
+	// 기존 메모리 매니저에도 저장 (통계용)
+	bws.memManager.AddTrade(trade)
+
+	// 배치 통계에 추가 (개별 로그 대신)
+	// bws.addBatchStats(symbol, "trade") // 파일 저장 안하므로 통계 불필요
+}
+
+// symbolCountReportRoutine 구독 중인 심볼 개수 보고 고루틴
+func (bws *BinanceWebSocket) symbolCountReportRoutine() {
+	ticker := time.NewTicker(bws.batchStats.reportInterval)
+	defer ticker.Stop()
+
+	log.Printf("🎯 WebSocket 심볼 보고 고루틴 시작 (인스턴스: %p)", bws)
+
+	for {
+		select {
+		case <-bws.ctx.Done():
+			log.Printf("🔴 WebSocket 심볼 보고 고루틴 종료 (인스턴스: %p)", bws)
+			return
+		case <-ticker.C:
+			bws.reportSymbolCount()
+		}
+	}
+}
+
+// reportSymbolCount 구독 중인 심볼 개수 보고
+func (bws *BinanceWebSocket) reportSymbolCount() {
+	symbolCount := len(bws.symbols)
+	streamCount := symbolCount * 2
+
+	// 로거가 있으면 로거 사용, 없으면 log.Printf 사용 (중복 제거)
 	if bws.logger != nil {
-		bws.logger.LogDebug("%s 체결 저장: %s %s@%s", symbol, sideStr, quantity, price)
+		bws.logger.LogStatus("🔗 WebSocket 구독 중: %d개 심볼 (%d개 스트림) [인스턴스: %p]", symbolCount, streamCount, bws)
 	} else {
-		log.Printf("✅ %s 체결 저장: %s %s@%s", symbol, sideStr, quantity, price)
+		log.Printf("2025/07/22 %s STATUS: 🔗 WebSocket 구독 중: %d개 심볼 (%d개 스트림) [인스턴스: %p]",
+			time.Now().Format("15:04:05"), symbolCount, streamCount, bws)
 	}
 }
 
