@@ -68,39 +68,28 @@
     "_important": "이 설정들이 수익성에 직접적인 영향을 미칩니다!",
     
     "pump_detection": {
-      "_pump_title": "💹 펌핑(급등) 감지 설정",
-      "_pump_description": "가격 급등을 실시간으로 감지하는 알고리즘 설정",
+      "_title": "🚨 펌핑(급등) 감지 설정",
+      "_description": "가격 급등을 감지하여 자동으로 데이터를 수집하고 알림을 보냅니다",
       
       "enabled": true,
-      "_enabled_help": "펌핑 감지 활성화 여부",
-      "_enabled_tip": "false로 설정하면 펌핑 감지를 완전히 비활성화",
+      "_enabled_help": "펌핑 감지 기능 활성화 여부",
+      "_enabled_tip": "false로 설정하면 펌핑 감지를 비활성화합니다",
       
-      "price_change_threshold": 0.5,
-      "_price_threshold_help": "펌핑 감지 임계값 (%) - 이 값 이상 상승하면 펌핑으로 판단 [테스트용: 0.5%]",
-      "_price_threshold_examples": "예시: 3.0 = 3% 이상 상승, 5.0 = 5% 이상 상승",
-      "_price_threshold_strategy": "전략: 낮은 값(1-2%) = 민감한 감지, 높은 값(5-10%) = 확실한 펌핑만",
-      "_price_threshold_risk": "⚠️ 너무 낮으면 노이즈가 많고, 너무 높으면 기회를 놓칠 수 있음",
-      "_price_threshold_recommendation": "권장: 초보자 5%, 숙련자 3%, 공격적 거래 1-2%",
+      "price_change_threshold": 1.0,
+      "_price_change_threshold_help": "펌핑으로 판단할 최소 가격 상승률 (%)",
+      "_price_change_threshold_range": "권장 범위: 0.5-5.0% (낮을수록 민감, 높을수록 확실한 신호만)",
+      "_price_change_threshold_tip": "🔧 성능 최적화: 0.5% → 1.0%로 상향 조정하여 노이즈 감소",
+      "_price_change_threshold_examples": {
+        "_scalping": "0.5-1.0% (초단타용, 빠른 반응)",
+        "_swing": "1.0-3.0% (스윙용, 확실한 신호)",
+        "_safe": "3.0-5.0% (안전한 거래, 강한 신호만)"
+      },
       
-      "time_window_seconds": 1,
-      "_time_window_help": "가격 변화를 측정할 시간 윈도우 (초)",
-      "_time_window_examples": "예시: 1초 = 1초 내 변화율, 5초 = 5초 내 변화율",
-      "_time_window_strategy": "짧은 시간(1-2초) = 빠른 반응, 긴 시간(5-10초) = 안정적 감지",
-      "_time_window_tip": "단타 거래에는 1-2초, 스윙 거래에는 5-10초 권장",
-      
-      "min_score": 60.0,
-      "_min_score_help": "최소 신뢰도 점수 (0-100)",
-      "_min_score_calculation": "거래량, 스프레드, 패턴 등을 종합해서 계산",
-      "_min_score_tip": "높은 값일수록 확실한 신호만 받지만 기회를 놓칠 수 있음",
-      
-      "volume_threshold": 100.0,
-      "_volume_threshold_help": "거래량 증가 임계값 (%)",
-      "_volume_threshold_purpose": "펌핑 시 거래량도 함께 증가하는지 확인",
-      "_volume_threshold_tip": "가격만 오르고 거래량이 적으면 가짜 펌핑일 가능성이 높음",
-      
-      "time_window_seconds_max": 10,
-      "_time_window_max_help": "적응형 시간 윈도우 최대값 (초)",
-      "_adaptive_explanation": "거래가 적을 때 자동으로 시간 윈도우를 확장해서 데이터 부족 문제 해결"
+      "time_window_seconds": 2,
+      "_time_window_seconds_help": "가격 변동을 측정할 시간 윈도우 (초)",
+      "_time_window_seconds_range": "권장 범위: 1-10초",
+      "_time_window_seconds_tip": "🔧 성능 최적화: 1초 → 2초로 조정하여 안정성 향상",
+      "_time_window_seconds_note": "짧으면 민감하지만 노이즈 많음, 길면 안정적이지만 늦은 감지"
     },
     
     "listing": {

@@ -153,7 +153,7 @@ func (sm *SignalManager) Stop() {
 
 // pumpDetectionRoutine 펌핑 감지 루틴
 func (sm *SignalManager) pumpDetectionRoutine() {
-	ticker := time.NewTicker(1 * time.Second) // 1초마다 체크
+	ticker := time.NewTicker(5 * time.Second) // 🔧 성능 최적화: 1초 → 5초로 변경
 	defer ticker.Stop()
 
 	for {
@@ -170,34 +170,39 @@ func (sm *SignalManager) pumpDetectionRoutine() {
 func (sm *SignalManager) detectPumpSignals() {
 	symbols := sm.memManager.GetSymbols()
 
-	// 🔍 디버깅: 기본 상태 로그
-	log.Printf("🔍 [DEBUG] 펌핑 감지 시작: 심볼 %d개, 임계값 %.1f%%, 시간윈도우 %d초",
-		len(symbols), sm.config.PumpDetection.PriceChangeThreshold, sm.config.PumpDetection.TimeWindowSeconds)
+	// 🔧 성능 최적화: 로깅 대폭 축소 (30초마다 한 번만)
+	now := time.Now()
+	if now.Second()%30 == 0 {
+		log.Printf("🔍 [DEBUG] 펌핑 감지: 심볼 %d개, 임계값 %.1f%%",
+			len(symbols), sm.config.PumpDetection.PriceChangeThreshold)
+	}
 
 	for i, symbol := range symbols {
-		// 🔍 디버깅: 첫 5개 심볼만 상세 로그
-		if i < 5 {
-			trades := sm.memManager.GetRecentTrades(symbol, 100)
+		// 🔧 성능 최적화: 디버그 로깅을 더욱 축소 (첫 3개 심볼만, 그리고 30초마다만)
+		showDebug := i < 3 && now.Second()%30 == 0
+		
+		if showDebug {
+			trades := sm.memManager.GetRecentTrades(symbol, 50) // 100 → 50으로 축소
 			log.Printf("🔍 [DEBUG] 심볼 %s: 최근 체결 %d개", symbol, len(trades))
 		}
 		// 🔧 적응형 시간 윈도우: 충분한 체결 데이터 확보
 		// 1. 기본 시간 윈도우 시도
 		baseWindow := sm.config.PumpDetection.TimeWindowSeconds
-		maxWindow := baseWindow * 5 // 최대 5배까지 확장
+		maxWindow := baseWindow * 3 // 🔧 성능 최적화: 5배 → 3배로 축소
 
 		var filteredTrades []*memory.TradeData
 		currentWindow := baseWindow
 
 		// 충분한 체결 데이터가 있을 때까지 시간 윈도우 확장
 		for currentWindow <= maxWindow {
-			// 🔧 안전한 데이터 조회 (최대 500개로 제한)
-			tradeCount := currentWindow * 50 // 300 → 50으로 축소
-			if tradeCount > 500 {            // 최대 500개 제한
-				tradeCount = 500
+			// 🔧 성능 최적화: 안전한 데이터 조회 (더욱 축소)
+			tradeCount := currentWindow * 30 // 50 → 30으로 축소
+			if tradeCount > 200 {            // 500 → 200으로 축소
+				tradeCount = 200
 			}
 			trades := sm.memManager.GetRecentTrades(symbol, tradeCount)
 
-			if len(trades) < 5 {
+			if len(trades) < 3 { // 5 → 3으로 축소
 				break // 전체 체결 데이터가 너무 적음
 			}
 
@@ -221,8 +226,8 @@ func (sm *SignalManager) detectPumpSignals() {
 		// 체결 데이터 기반 가격 변동 계산
 		priceChangePercent := sm.calculatePriceChangeFromTrades(filteredTrades)
 
-		// 🔍 디버깅: 가격 변동 계산 결과 로그 (첫 5개 심볼만)
-		if i < 5 {
+		// 🔧 성능 최적화: 디버깅 로그를 더욱 축소 (중요한 것만)
+		if showDebug && priceChangePercent > 0.1 { // 0.1% 이상 변동시만 로그
 			log.Printf("🔍 [DEBUG] 심볼 %s: 가격변동 %.3f%%, 체결수 %d개, 윈도우 %d초",
 				symbol, priceChangePercent, len(filteredTrades), currentWindow)
 		}
