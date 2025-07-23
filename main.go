@@ -312,8 +312,10 @@ func (app *Application) printSystemStats() {
 	// 메모리 통계
 	memStats := app.memManager.GetMemoryStats()
 	stats["memory"] = memStats
-	app.logger.LogMemory("메모리: 오더북 %v개, 체결 %v개, 시그널 %v개",
-		memStats["total_orderbooks"], memStats["total_trades"], memStats["total_signals"])
+	app.logger.LogMemory("메모리: 현재 오더북=%v개, 체결=%v개, 시그널=%v개 | 누적: 오더북=%v개, 체결=%v개 | 처리율: %.1f개/초(오더북), %.1f개/초(체결)",
+		memStats["total_orderbooks"], memStats["total_trades"], memStats["total_signals"],
+		memStats["cumulative_orderbooks"], memStats["cumulative_trades"],
+		memStats["orderbook_rate_per_sec"], memStats["trade_rate_per_sec"])
 
 	// WebSocket 통계
 	wsStats := app.websocket.GetWorkerPoolStats()
@@ -322,6 +324,23 @@ func (app *Application) printSystemStats() {
 		wsStats["is_connected"],
 		wsStats["data_channel_buffer"], wsStats["data_channel_capacity"],
 		wsStats["trade_channel_buffer"], wsStats["trade_channel_capacity"])
+
+	// 지연 모니터링 통계 추가 ⭐ 새로 추가
+	if app.latencyMonitor != nil {
+		latencyOverall := app.latencyMonitor.GetOverallStats()
+		stats["latency"] = latencyOverall
+
+		if latencyOverall["total_records"].(int) > 0 {
+			app.logger.LogLatencyStats("지연: 평균=%.3f초, 최대=%.3f초, 경고=%d개, 심각=%d개 (총 %d건)",
+				latencyOverall["avg_latency"].(float64),
+				latencyOverall["max_latency"].(float64),
+				latencyOverall["warn_symbols"].(int),
+				latencyOverall["critical_symbols"].(int),
+				latencyOverall["total_records"].(int))
+		} else {
+			app.logger.LogLatencyStats("지연: 데이터 수집 중... (아직 기록 없음)")
+		}
+	}
 
 	// 성능 통계
 	perfStats := app.perfMonitor.GetStats()

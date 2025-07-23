@@ -46,8 +46,8 @@
       "_enabled_comment": "펌핑 감지 활성화 여부",
       "min_score": 5.0,
       "_min_score_comment": "최소 시그널 점수 (현재 사용 안함)",
-      "price_change_threshold": 1.0,
-      "_threshold_comment": "가격 변화 임계값 (%) - 1초 내 1% 상승시 펌핑 감지",
+      "price_change_threshold": 0.5,
+      "_threshold_comment": "가격 변화 임계값 (%) - 1초 내 0.5% 상승시 펌핑 감지 (민감도 2배 향상)",
       "time_window_seconds": 1,
       "_time_window_comment": "감지 시간 윈도우 (초)"
     },
@@ -78,13 +78,13 @@
     "flush_interval_seconds": 5
   },
   
-  "triggers": {
-    "_comment": "트리거 시스템 설정 (signals와 동일하게 유지 필요)",
-    "pump_detection": {
-      "enabled": true,
-      "min_score": 5.0,
-      "price_change_threshold": 1.0,
-      "_trigger_comment": "펌핑 감지시 ±5초 데이터 저장 트리거",
+      "triggers": {
+      "_comment": "트리거 시스템 설정 (signals와 동일하게 유지 필요)",
+      "pump_detection": {
+        "enabled": true,
+        "min_score": 5.0,
+        "price_change_threshold": 0.5,
+        "_trigger_comment": "펌핑 감지시 ±5초 데이터 저장 트리거 (0.5% 임계값)",
       "time_window_seconds": 1
     },
     "snapshot": {
@@ -121,8 +121,8 @@
     "_max_size_comment": "로그 파일 최대 크기 (MB) - 이 크기에 도달하면 로테이션",
     "max_backups": 3,
     "_max_backups_comment": "백업 로그 파일 최대 개수",
-    "latency_warn_seconds": 2.0,
-    "_latency_warn_comment": "레이턴시 경고 임계값 (초)",
+    "latency_warn_seconds": 1.0,
+    "_latency_warn_comment": "레이턴시 경고 임계값 (초) - 1초로 낮춰서 더 민감하게 감지",
     "latency_critical_seconds": 10.0,
     "_latency_critical_comment": "레이턴시 크리티컬 임계값 (초)",
     "latency_stats_interval_seconds": 30,

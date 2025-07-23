@@ -333,9 +333,16 @@ type Manager struct {
 	retentionMinutes          int
 	cleanupInterval           time.Duration
 
-	// 모니터링 카운터
+	// 모니터링 카운터 (누적)
 	orderbookCounter int
 	tradeCounter     int
+
+	// 처리율 추적 (성능 최적화)
+	lastStatsTime      time.Time
+	lastOrderbookCount int
+	lastTradeCount     int
+	orderbookRate      float64 // 초당 오더북 처리율
+	tradeRate          float64 // 초당 체결 처리율
 }
 
 // NewManager 새 메모리 관리자 생성 (심볼별 관리)
@@ -355,6 +362,12 @@ func NewManager(maxOrderbooks, maxTrades, maxSignals, retentionMinutes int, orde
 		cleanupInterval:           time.Duration(retentionMinutes) * time.Minute,
 		orderbookCounter:          0,
 		tradeCounter:              0,
+		// 처리율 추적 초기화
+		lastStatsTime:      time.Now(),
+		lastOrderbookCount: 0,
+		lastTradeCount:     0,
+		orderbookRate:      0.0,
+		tradeRate:          0.0,
 	}
 
 	// 정리 고루틴 시작
@@ -544,6 +557,9 @@ func (mm *Manager) GetSystemStats() map[string]interface{} {
 	mm.mu.RLock()
 	defer mm.mu.RUnlock()
 
+	// 처리율 업데이트 (성능 최적화)
+	mm.updateProcessingRates()
+
 	totalOrderbooks := 0
 	totalTrades := 0
 	totalCompressed := 0
@@ -555,12 +571,23 @@ func (mm *Manager) GetSystemStats() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"total_orderbooks":          totalOrderbooks,
-		"total_trades":              totalTrades,
-		"total_compressed_trades":   totalCompressed,
-		"total_signals":             len(mm.signals),
-		"symbols_with_orderbooks":   len(mm.symbols),
-		"symbols_with_trades":       len(mm.symbols),
+		// 현재 메모리 상태
+		"total_orderbooks":        totalOrderbooks,
+		"total_trades":            totalTrades,
+		"total_compressed_trades": totalCompressed,
+		"total_signals":           len(mm.signals),
+		"symbols_with_orderbooks": len(mm.symbols),
+		"symbols_with_trades":     len(mm.symbols),
+
+		// 누적 처리량 (총 처리한 양)
+		"cumulative_orderbooks": mm.orderbookCounter,
+		"cumulative_trades":     mm.tradeCounter,
+
+		// 처리율 (초당 처리량)
+		"orderbook_rate_per_sec": mm.orderbookRate,
+		"trade_rate_per_sec":     mm.tradeRate,
+
+		// 설정 정보
 		"retention_minutes":         mm.retentionMinutes,
 		"max_orderbooks_per_symbol": mm.maxOrderbooks,
 		"max_trades_per_symbol":     mm.maxTrades,
@@ -575,6 +602,25 @@ func (mm *Manager) calculateCompressionEfficiency(rawTrades, compressedTrades in
 		return 0.0
 	}
 	return float64(compressedTrades) / float64(total) * 100.0
+}
+
+// updateProcessingRates 처리율 계산 (성능 최적화 - 락 없음)
+func (mm *Manager) updateProcessingRates() {
+	now := time.Now()
+	timeDiff := now.Sub(mm.lastStatsTime).Seconds()
+
+	// 30초 이상 경과시에만 업데이트 (성능 최적화)
+	if timeDiff >= 30.0 {
+		orderbookDiff := mm.orderbookCounter - mm.lastOrderbookCount
+		tradeDiff := mm.tradeCounter - mm.lastTradeCount
+
+		mm.orderbookRate = float64(orderbookDiff) / timeDiff
+		mm.tradeRate = float64(tradeDiff) / timeDiff
+
+		mm.lastStatsTime = now
+		mm.lastOrderbookCount = mm.orderbookCounter
+		mm.lastTradeCount = mm.tradeCounter
+	}
 }
 
 // cleanupRoutine 정리 고루틴 (심볼별 분산 정리)

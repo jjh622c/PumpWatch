@@ -127,10 +127,10 @@ func (sm *SignalManager) detectPumpSignals() {
 		// 1초 내 가격 변동 계산
 		priceChangePercent := sm.calculateOneSecondPriceChange(orderbooks)
 
-		// 🎯 핵심: 1초에 +3% 이상 상승 시에만 시그널 발생 (라이브 수집용)
-		if priceChangePercent >= 3.0 {
+		// 🎯 핵심: config에서 설정한 임계값 이상 상승 시에만 시그널 발생
+		if priceChangePercent >= sm.config.PumpDetection.PriceChangeThreshold {
 			// 🚨 펌핑 시그널 감지 로그 (상세 정보)
-			log.Printf("🚨 [PUMP DETECTED] %s: +%.2f%% (1초간 상승)", symbol, priceChangePercent)
+			log.Printf("🚨 [PUMP DETECTED] %s: +%.2f%% (1초간 상승, 임계값: %.1f%%)", symbol, priceChangePercent, sm.config.PumpDetection.PriceChangeThreshold)
 
 			// 현재 가격 정보 추가
 			if len(orderbooks) > 0 && len(orderbooks[len(orderbooks)-1].Bids) > 0 && len(orderbooks[len(orderbooks)-1].Asks) > 0 {
