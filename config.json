@@ -1,72 +1,137 @@
 {
+  "_comment": "============= NoticePumpCatch 설정 파일 =============",
+  "_description": "바이낸스 USDT 페어 펌핑 감지 및 업비트 상장공시 모니터링 시스템",
+  "_version": "1.0",
+  "_last_updated": "2025-07-23",
+  
   "websocket": {
+    "_comment": "웹소켓 연결 및 심볼 관리 설정",
     "symbols": [],
+    "_symbols_comment": "모니터링할 심볼 목록 (비어있으면 auto_sync로 자동 수집)",
     "worker_count": 8,
+    "_worker_count_comment": "동시 처리 워커 수 (CPU 코어 수에 맞춰 조정)",
     "buffer_size": 5000,
+    "_buffer_size_comment": "메시지 버퍼 크기 (높을수록 안정적이지만 메모리 사용량 증가)",
     "auto_sync_symbols": true,
+    "_auto_sync_comment": "업비트 상장 심볼을 바이낸스에서 자동 동기화",
     "sync_interval_minutes": 5,
+    "_sync_interval_comment": "심볼 동기화 주기 (분)",
     "sync_enabled": true,
+    "_sync_enabled_comment": "심볼 동기화 활성화 여부",
     "enable_upbit_filter": true,
-    "upbit_sync_minutes": 30
+    "_upbit_filter_comment": "업비트 상장 코인만 필터링",
+    "upbit_sync_minutes": 30,
+    "_upbit_sync_comment": "업비트 심볼 목록 갱신 주기 (분)"
   },
+  
   "memory": {
+    "_comment": "메모리 관리 및 데이터 보존 설정",
     "orderbook_retention_minutes": 0.5,
+    "_orderbook_retention_comment": "오더북 데이터 메모리 보존 시간 (분) - 펌핑 감지용",
     "trade_retention_minutes": 1,
+    "_trade_retention_comment": "체결 데이터 메모리 보존 시간 (분) - 펌핑 감지용",
     "max_orderbooks_per_symbol": 50,
+    "_max_orderbooks_comment": "심볼당 최대 오더북 개수",
     "max_trades_per_symbol": 100,
-    "cleanup_interval_minutes": 10
+    "_max_trades_comment": "심볼당 최대 체결 개수",
+    "cleanup_interval_minutes": 10,
+    "_cleanup_interval_comment": "메모리 정리 주기 (분)"
   },
+  
   "signals": {
+    "_comment": "시그널 감지 설정",
     "pump_detection": {
+      "_comment": "펌핑 감지 설정",
       "enabled": true,
+      "_enabled_comment": "펌핑 감지 활성화 여부",
       "min_score": 5.0,
-      "price_change_threshold": 5.0,
-      "time_window_seconds": 1
+      "_min_score_comment": "최소 시그널 점수 (현재 사용 안함)",
+      "price_change_threshold": 1.0,
+      "_threshold_comment": "가격 변화 임계값 (%) - 1초 내 1% 상승시 펌핑 감지",
+      "time_window_seconds": 1,
+      "_time_window_comment": "감지 시간 윈도우 (초)"
     },
     "listing": {
+      "_comment": "상장공시 감지 설정",
       "enabled": true,
-      "auto_trigger": false
+      "_listing_enabled_comment": "상장공시 감지 활성화",
+      "auto_trigger": false,
+      "_auto_trigger_comment": "상장공시 자동 트리거 (현재 비활성화)"
     }
   },
+  
   "storage": {
+    "_comment": "데이터 저장 설정",
     "base_dir": "./data",
+    "_base_dir_comment": "데이터 저장 기본 디렉토리",
     "retention_days": 30,
-    "compress_data": false
+    "_retention_comment": "데이터 보존 기간 (일)",
+    "compress_data": false,
+    "_compress_comment": "데이터 압축 사용 여부"
   },
+  
   "raw_data": {
+    "_comment": "원시 데이터 설정 (현재 사용 안함)",
     "base_dir": "./data/raw",
     "buffer_size": 8192,
     "use_compression": false,
     "flush_interval_seconds": 5
   },
+  
   "triggers": {
+    "_comment": "트리거 시스템 설정 (signals와 동일하게 유지 필요)",
     "pump_detection": {
       "enabled": true,
       "min_score": 5.0,
-      "price_change_threshold": 5.0,
+      "price_change_threshold": 1.0,
+      "_trigger_comment": "펌핑 감지시 ±5초 데이터 저장 트리거",
       "time_window_seconds": 1
     },
     "snapshot": {
+      "_comment": "스냅샷 설정",
       "enabled": true,
       "pre_trigger_seconds": 60,
+      "_pre_trigger_comment": "트리거 전 데이터 저장 시간 (초)",
       "post_trigger_seconds": 60,
-      "max_snapshots_per_day": 100
+      "_post_trigger_comment": "트리거 후 데이터 저장 시간 (초)",
+      "max_snapshots_per_day": 100,
+      "_max_snapshots_comment": "일일 최대 스냅샷 수"
     }
   },
+  
   "notification": {
+    "_comment": "알림 설정 (현재 비활성화)",
     "slack_webhook": "",
+    "_slack_comment": "슬랙 웹훅 URL (비어있으면 비활성화)",
     "telegram_token": "",
+    "_telegram_token_comment": "텔레그램 봇 토큰",
     "telegram_chat_id": "",
-    "alert_threshold": 80
+    "_telegram_chat_comment": "텔레그램 채팅 ID",
+    "alert_threshold": 80,
+    "_alert_threshold_comment": "알림 임계값 (%)"
   },
+  
   "logging": {
-    "level": "warning",
+    "_comment": "로깅 시스템 설정",
+    "level": "info",
+    "_level_comment": "로그 레벨: debug, info, warning, error, critical",
     "output_file": "./logs/noticepumpcatch.log",
-    "max_size": 100,
-    "max_backups": 10,
+    "_output_comment": "메인 로그 파일 경로",
+    "max_size": 10,
+    "_max_size_comment": "로그 파일 최대 크기 (MB) - 이 크기에 도달하면 로테이션",
+    "max_backups": 3,
+    "_max_backups_comment": "백업 로그 파일 최대 개수",
     "latency_warn_seconds": 2.0,
+    "_latency_warn_comment": "레이턴시 경고 임계값 (초)",
     "latency_critical_seconds": 10.0,
+    "_latency_critical_comment": "레이턴시 크리티컬 임계값 (초)",
     "latency_stats_interval_seconds": 30,
-    "log_rotation_interval_minutes": 10
+    "_latency_stats_comment": "레이턴시 통계 출력 주기 (초)",
+    "log_rotation_interval_minutes": 360,
+    "_rotation_comment": "시간 기반 로그 로테이션 주기 (분) - 6시간마다",
+    "critical_log_file": "./logs/critical_events.log",
+    "_critical_file_comment": "중요 이벤트 전용 로그 파일 (오류, 지연, 재시작 등)",
+    "enable_critical_separation": true,
+    "_critical_separation_comment": "중요 이벤트 별도 파일 저장 활성화"
   }
 } 

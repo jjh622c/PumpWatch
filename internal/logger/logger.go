@@ -59,15 +59,20 @@ type LoggerConfig struct {
 	LatencyCriticalSeconds      float64  `json:"latency_critical_seconds"`
 	LatencyStatsIntervalSeconds int      `json:"latency_stats_interval_seconds"`
 	LogRotationIntervalMinutes  int      `json:"log_rotation_interval_minutes"`
+	CriticalLogFile             string   `json:"critical_log_file"`
+	EnableCriticalSeparation    bool     `json:"enable_critical_separation"`
 }
 
 // Logger 로거 구조체
 type Logger struct {
 	config           LoggerConfig
 	file             *os.File
+	criticalFile     *os.File
 	fileLogger       *log.Logger
+	criticalLogger   *log.Logger
 	consoleLogger    *log.Logger
 	mu               sync.Mutex
+	criticalMu       sync.Mutex
 	lastStatus       time.Time
 	statusInterval   time.Duration
 	lastRotation     time.Time
@@ -102,6 +107,15 @@ func NewLogger(config LoggerConfig) (*Logger, error) {
 		rotationInterval: time.Duration(config.LogRotationIntervalMinutes) * time.Minute,
 	}
 
+	// 중요 이벤트 로그 파일 초기화
+	if config.EnableCriticalSeparation && config.CriticalLogFile != "" {
+		criticalFile, err := os.OpenFile(config.CriticalLogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		if err == nil {
+			logger.criticalFile = criticalFile
+			logger.criticalLogger = log.New(criticalFile, "", log.LstdFlags)
+		}
+	}
+
 	return logger, nil
 }
 
@@ -111,8 +125,8 @@ func (l *Logger) log(level LogLevel, format string, args ...interface{}) {
 		return
 	}
 
-	// 시간 기반 로그 롤링 확인
-	l.checkTimeBasedRotation()
+	// 크기 기반 로그 롤링 확인 (시간 기반보다 우선)
+	l.checkSizeBasedRotation()
 
 	levelStr := LogLevelString[level]
 	timestamp := time.Now().Format("2006/01/02 15:04:05")
@@ -123,6 +137,9 @@ func (l *Logger) log(level LogLevel, format string, args ...interface{}) {
 	l.mu.Lock()
 	l.fileLogger.Println(logEntry)
 	l.mu.Unlock()
+
+	// 중요 이벤트 별도 저장 (레이턴시, 재시작, 에러, 크리티컬)
+	l.logCriticalIfNeeded(level, message, logEntry)
 
 	// 콘솔에는 WARNING 이상만 출력 (INFO는 상태 요약에서만)
 	if level >= WARNING {
@@ -291,9 +308,98 @@ func (l *Logger) Close() error {
 	defer l.mu.Unlock()
 
 	if l.file != nil {
-		return l.file.Close()
+		l.file.Close()
 	}
+
+	if l.criticalFile != nil {
+		l.criticalFile.Close()
+	}
+
 	return nil
+}
+
+// checkSizeBasedRotation 크기 기반 로그 롤링 확인
+func (l *Logger) checkSizeBasedRotation() {
+	if l.file == nil {
+		return
+	}
+
+	info, err := l.file.Stat()
+	if err != nil {
+		return
+	}
+
+	// 최대 크기 초과시 로테이션 (시간 기반보다 우선)
+	if info.Size() > int64(l.config.MaxSize*1024*1024) {
+		l.rotateBySize()
+	}
+}
+
+// rotateBySize 크기 기반 로그 롤링 수행
+func (l *Logger) rotateBySize() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	// 현재 파일 닫기
+	if l.file != nil {
+		l.file.Close()
+	}
+
+	// 타임스탬프가 포함된 백업 파일명 생성
+	timestamp := time.Now().Format("20060102_150405")
+	backupPath := fmt.Sprintf("%s.%s", l.config.OutputFile, timestamp)
+
+	// 기존 파일을 백업으로 이동
+	if err := os.Rename(l.config.OutputFile, backupPath); err != nil {
+		// 파일이 없거나 이동 실패시 무시
+		return
+	}
+
+	// 새 파일 열기
+	file, err := os.OpenFile(l.config.OutputFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		return
+	}
+
+	l.file = file
+	l.fileLogger = log.New(file, "", log.LstdFlags)
+}
+
+// logCriticalIfNeeded 중요 이벤트 감지하여 별도 파일에 저장
+func (l *Logger) logCriticalIfNeeded(level LogLevel, message, logEntry string) {
+	if !l.config.EnableCriticalSeparation || l.criticalLogger == nil {
+		return
+	}
+
+	// 중요 이벤트 감지 조건
+	isCritical := false
+
+	// 1. 레벨이 ERROR 이상
+	if level >= ERROR {
+		isCritical = true
+	}
+
+	// 2. 특정 키워드 포함 검사
+	criticalKeywords := []string{
+		"밀림 감지", "latency", "지연", "재시작", "restart", "panic", "crash",
+		"버그", "bug", "오류", "error", "실패", "failed", "종료", "shutdown",
+		"연결 끊김", "connection", "timeout", "메모리 부족", "memory",
+	}
+
+	messageLower := strings.ToLower(message)
+	for _, keyword := range criticalKeywords {
+		if strings.Contains(messageLower, strings.ToLower(keyword)) {
+			isCritical = true
+			break
+		}
+	}
+
+	// 중요 이벤트인 경우 별도 파일에 저장
+	if isCritical {
+		l.criticalMu.Lock()
+		l.criticalLogger.Println(logEntry)
+		l.criticalMu.Unlock()
+	}
 }
 
 // checkTimeBasedRotation 시간 기반 로그 롤링 확인
