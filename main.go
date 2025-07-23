@@ -64,6 +64,13 @@ func (app *Application) Initialize() error {
 		1000,                                        // 최대 시그널 수
 		app.config.Memory.TradeRetentionMinutes,     // 체결 데이터 보존 시간
 		app.config.Memory.OrderbookRetentionMinutes, // 오더북 데이터 보존 시간 (0.1분 = 6초)
+		// 🔧 하드코딩 제거: config에서 새로 추가된 값들 전달
+		app.config.Memory.CompressionIntervalSeconds,
+		app.config.Memory.HeapWarningMB,
+		app.config.Memory.GCThresholdOrderbooks,
+		app.config.Memory.GCThresholdTrades,
+		app.config.Memory.MaxGoroutines,
+		app.config.Memory.MonitoringIntervalSeconds,
 	)
 	app.logger.LogSuccess("메모리 관리자 생성 완료")
 
@@ -147,6 +154,9 @@ func (app *Application) Initialize() error {
 			app.config.WebSocket.WorkerCount,
 			app.config.WebSocket.BufferSize,
 			app.latencyMonitor,
+			// 🔧 하드코딩 제거: config에서 새로 추가된 값들 전달
+			app.config.WebSocket.MaxSymbolsPerGroup,
+			app.config.WebSocket.ReportIntervalSeconds,
 		)
 		app.logger.LogSuccess("WebSocket 클라이언트 생성 완료")
 	} else {
@@ -222,6 +232,9 @@ func (app *Application) Start() error {
 				app.config.WebSocket.WorkerCount,
 				app.config.WebSocket.BufferSize,
 				app.latencyMonitor,
+				// 🔧 하드코딩 제거: config에서 새로 추가된 값들 전달
+				app.config.WebSocket.MaxSymbolsPerGroup,
+				app.config.WebSocket.ReportIntervalSeconds,
 			)
 			app.logger.LogSuccess("✅ WebSocket 클라이언트 생성 완료 (%d개 심볼)", len(syncedSymbols))
 		} else {
@@ -261,6 +274,12 @@ func (app *Application) Stop() error {
 
 	// 컨텍스트 취소
 	app.cancel()
+
+	// 시그널 관리자 중지 (🔧 고루틴 누수 방지)
+	if app.signalManager != nil {
+		app.signalManager.Stop()
+		app.logger.LogConnection("시그널 관리자 중지")
+	}
 
 	// 심볼 동기화 중지
 	if app.symbolSyncer != nil {
@@ -310,7 +329,7 @@ func (app *Application) printSystemStats() {
 	stats := make(map[string]interface{})
 
 	// 메모리 통계
-	memStats := app.memManager.GetMemoryStats()
+	memStats := app.memManager.GetSystemStats()
 	stats["memory"] = memStats
 	app.logger.LogMemory("메모리: 현재 오더북=%v개, 체결=%v개, 시그널=%v개 | 누적: 오더북=%v개, 체결=%v개 | 처리율: %.1f개/초(오더북), %.1f개/초(체결)",
 		memStats["total_orderbooks"], memStats["total_trades"], memStats["total_signals"],
@@ -458,16 +477,6 @@ func main() {
 
 	// 🔍 시스템 모니터링 시작 (장시간 실행용)
 	go app.startSystemMonitoring()
-
-	// 상태 요약 출력 주기적 실행
-	statsTicker := time.NewTicker(30 * time.Second)
-	defer statsTicker.Stop()
-
-	go func() {
-		for range statsTicker.C {
-			app.printSystemStats()
-		}
-	}()
 
 	for {
 		select {

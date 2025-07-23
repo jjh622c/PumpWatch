@@ -1,6 +1,7 @@
 package signals
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -11,18 +12,19 @@ import (
 	"noticepumpcatch/internal/triggers"
 )
 
-// SignalManager 시그널 관리자 (메모리 기반)
+// SignalManager 시그널 관리자
 type SignalManager struct {
-	memManager     *memory.Manager
-	storageManager *storage.StorageManager
-	triggerManager *triggers.Manager
-	dataHandler    *storage.SignalDataHandler // 시그널 데이터 저장 핸들러 (메모리 기반)
-
-	// 상장공시 콜백 채널
+	memManager      *memory.Manager
+	storageManager  *storage.StorageManager
+	triggerManager  *triggers.Manager
+	dataHandler     *storage.SignalDataHandler
 	listingCallback chan ListingSignal
+	config          *SignalConfig
 
-	// 설정
-	config *SignalConfig
+	// 🔧 고루틴 누수 방지: 고루틴 관리 추가
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 
 	mu sync.RWMutex
 }
@@ -70,6 +72,8 @@ func NewSignalManager(
 	triggerManager *triggers.Manager,
 	config *SignalConfig,
 ) *SignalManager {
+	ctx, cancel := context.WithCancel(context.Background()) // 🔧 고루틴 누수 방지
+
 	sm := &SignalManager{
 		memManager:      memManager,
 		storageManager:  storageManager,
@@ -77,10 +81,16 @@ func NewSignalManager(
 		dataHandler:     storage.NewSignalDataHandler(storageManager, memManager), // rawManager 제거됨
 		listingCallback: make(chan ListingSignal, 100),
 		config:          config,
+		ctx:             ctx,    // 🔧 고루틴 누수 방지
+		cancel:          cancel, // 🔧 고루틴 누수 방지
 	}
 
 	// 상장공시 콜백 처리 고루틴 시작
-	go sm.handleListingSignals()
+	sm.wg.Add(1) // 🔧 고루틴 누수 방지
+	go func() {
+		defer sm.wg.Done()
+		sm.handleListingSignals()
+	}()
 
 	return sm
 }
@@ -91,13 +101,54 @@ func (sm *SignalManager) Start() {
 
 	// 펌핑 감지 활성화
 	if sm.config.PumpDetection.Enabled {
-		go sm.pumpDetectionRoutine()
+		sm.wg.Add(1) // 🔧 고루틴 누수 방지
+		go func() {
+			defer sm.wg.Done()
+			sm.pumpDetectionRoutine()
+		}()
 	}
 
 	// 상장공시 감지 활성화
 	if sm.config.Listing.Enabled {
 		log.Printf("📢 상장공시 감지 활성화")
 	}
+}
+
+// Stop 시그널 감지 중지 (🔧 고루틴 누수 방지)
+func (sm *SignalManager) Stop() {
+	log.Printf("🛑 시그널 감지 중지 시작")
+
+	// 컨텍스트 취소로 모든 고루틴 정리
+	if sm.cancel != nil {
+		sm.cancel()
+	}
+
+	// 모든 고루틴 종료 대기 (타임아웃 설정)
+	done := make(chan struct{})
+	go func() {
+		sm.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		log.Printf("✅ 시그널 관리자: 모든 고루틴 정리 완료")
+	case <-time.After(3 * time.Second):
+		log.Printf("⚠️ 시그널 관리자: 고루틴 정리 타임아웃 (3초)")
+	}
+
+	// 채널 정리 (논블로킹)
+	go func() {
+		for {
+			select {
+			case <-sm.listingCallback:
+			default:
+				return
+			}
+		}
+	}()
+
+	log.Printf("🛑 시그널 감지 중지 완료")
 }
 
 // pumpDetectionRoutine 펌핑 감지 루틴
@@ -107,6 +158,8 @@ func (sm *SignalManager) pumpDetectionRoutine() {
 
 	for {
 		select {
+		case <-sm.ctx.Done(): // 🔧 고루틴 누수 방지: context 확인
+			return
 		case <-ticker.C:
 			sm.detectPumpSignals()
 		}
@@ -117,36 +170,96 @@ func (sm *SignalManager) pumpDetectionRoutine() {
 func (sm *SignalManager) detectPumpSignals() {
 	symbols := sm.memManager.GetSymbols()
 
-	for _, symbol := range symbols {
-		// 최근 1초간 오더북 데이터 가져오기
-		orderbooks := sm.memManager.GetRecentOrderbooks(symbol, 1) // 1초 데이터만
-		if len(orderbooks) < 2 {
+	// 🔍 디버깅: 기본 상태 로그
+	log.Printf("🔍 [DEBUG] 펌핑 감지 시작: 심볼 %d개, 임계값 %.1f%%, 시간윈도우 %d초",
+		len(symbols), sm.config.PumpDetection.PriceChangeThreshold, sm.config.PumpDetection.TimeWindowSeconds)
+
+	for i, symbol := range symbols {
+		// 🔍 디버깅: 첫 5개 심볼만 상세 로그
+		if i < 5 {
+			trades := sm.memManager.GetRecentTrades(symbol, 100)
+			log.Printf("🔍 [DEBUG] 심볼 %s: 최근 체결 %d개", symbol, len(trades))
+		}
+		// 🔧 적응형 시간 윈도우: 충분한 체결 데이터 확보
+		// 1. 기본 시간 윈도우 시도
+		baseWindow := sm.config.PumpDetection.TimeWindowSeconds
+		maxWindow := baseWindow * 5 // 최대 5배까지 확장
+
+		var filteredTrades []*memory.TradeData
+		currentWindow := baseWindow
+
+		// 충분한 체결 데이터가 있을 때까지 시간 윈도우 확장
+		for currentWindow <= maxWindow {
+			// 🔧 안전한 데이터 조회 (최대 500개로 제한)
+			tradeCount := currentWindow * 50 // 300 → 50으로 축소
+			if tradeCount > 500 {            // 최대 500개 제한
+				tradeCount = 500
+			}
+			trades := sm.memManager.GetRecentTrades(symbol, tradeCount)
+
+			if len(trades) < 5 {
+				break // 전체 체결 데이터가 너무 적음
+			}
+
+			// 현재 시간 윈도우로 필터링
+			filteredTrades = sm.filterTradesByTimeWindow(trades, currentWindow)
+
+			// 🎯 최소 2개 체결 확보되면 진행
+			if len(filteredTrades) >= 2 {
+				break
+			}
+
+			// 시간 윈도우 확장 (1초 → 2초 → 3초...)
+			currentWindow++
+		}
+
+		// 🚨 충분한 체결 데이터 없으면 스킵
+		if len(filteredTrades) < 2 {
 			continue
 		}
 
-		// 1초 내 가격 변동 계산
-		priceChangePercent := sm.calculateOneSecondPriceChange(orderbooks)
+		// 체결 데이터 기반 가격 변동 계산
+		priceChangePercent := sm.calculatePriceChangeFromTrades(filteredTrades)
 
-		// 🎯 핵심: config에서 설정한 임계값 이상 상승 시에만 시그널 발생
-		if priceChangePercent >= sm.config.PumpDetection.PriceChangeThreshold {
-			// 🚨 펌핑 시그널 감지 로그 (상세 정보)
-			log.Printf("🚨 [PUMP DETECTED] %s: +%.2f%% (1초간 상승, 임계값: %.1f%%)", symbol, priceChangePercent, sm.config.PumpDetection.PriceChangeThreshold)
+		// 🔍 디버깅: 가격 변동 계산 결과 로그 (첫 5개 심볼만)
+		if i < 5 {
+			log.Printf("🔍 [DEBUG] 심볼 %s: 가격변동 %.3f%%, 체결수 %d개, 윈도우 %d초",
+				symbol, priceChangePercent, len(filteredTrades), currentWindow)
+		}
 
-			// 현재 가격 정보 추가
-			if len(orderbooks) > 0 && len(orderbooks[len(orderbooks)-1].Bids) > 0 && len(orderbooks[len(orderbooks)-1].Asks) > 0 {
-				currentBid, _ := parseFloat(orderbooks[len(orderbooks)-1].Bids[0][0])
-				currentAsk, _ := parseFloat(orderbooks[len(orderbooks)-1].Asks[0][0])
-				currentMid := (currentBid + currentAsk) / 2
-				log.Printf("📊 [PUMP INFO] %s: 현재가=%.8f, 매수=%.8f, 매도=%.8f",
-					symbol, currentMid, currentBid, currentAsk)
+		// 🎯 시간 윈도우 보정: 확장된 시간에 비례해서 임계값 조정
+		adjustedThreshold := sm.config.PumpDetection.PriceChangeThreshold
+		if currentWindow > baseWindow {
+			// 시간이 늘어난 만큼 임계값도 비례 증가
+			adjustedThreshold = adjustedThreshold * (float64(currentWindow) / float64(baseWindow))
+		}
+
+		// 🎯 핵심: 조정된 임계값 이상 상승 시에만 시그널 발생
+		if priceChangePercent >= adjustedThreshold {
+			// 🚨 펌핑 시그널 감지 로그 (확장 윈도우 정보 포함)
+			windowInfo := ""
+			if currentWindow > baseWindow {
+				windowInfo = fmt.Sprintf(" (확장: %d초→%d초)", baseWindow, currentWindow)
 			}
 
-			// 최근 체결 데이터 가져오기 (±60초 저장용)
-			trades := sm.memManager.GetRecentTrades(symbol, 60)
-			log.Printf("💾 [PUMP SAVE] %s: 체결 %d건 데이터 수집", symbol, len(trades))
+			log.Printf("🚨 [PUMP DETECTED] %s: +%.2f%% (%d초간 실제 체결 기준%s, 임계값: %.1f%%, 체결: %d건)",
+				symbol, priceChangePercent, currentWindow, windowInfo,
+				adjustedThreshold, len(filteredTrades))
 
-			// 펌핑 신호 생성
-			signal := sm.createSimplePumpSignal(symbol, priceChangePercent, orderbooks, trades)
+			// 현재 가격 정보 (최신 체결 가격)
+			if len(filteredTrades) > 0 {
+				latestTrade := filteredTrades[len(filteredTrades)-1]
+				latestPrice, _ := parseFloat(latestTrade.Price)
+				log.Printf("📊 [PUMP INFO] %s: 최신체결가=%.8f, 체결량=%s, 매수/매도=%s",
+					symbol, latestPrice, latestTrade.Quantity, latestTrade.Side)
+			}
+
+			// 오더북 데이터도 수집 (참고용)
+			orderbooks := sm.memManager.GetRecentOrderbooks(symbol, 60)
+			log.Printf("💾 [PUMP SAVE] %s: 체결 %d건, 오더북 %d건 데이터 수집", symbol, len(filteredTrades), len(orderbooks))
+
+			// 펌핑 신호 생성 (체결 데이터 기반)
+			signal := sm.createTradeBasedPumpSignal(symbol, priceChangePercent, orderbooks, filteredTrades)
 
 			// 메모리에 저장
 			sm.memManager.AddSignal(signal)
@@ -171,21 +284,25 @@ func (sm *SignalManager) detectPumpSignals() {
 				"price_change": priceChangePercent,
 				"confidence":   signal.Confidence,
 				"action":       signal.Action,
+				"trade_count":  len(filteredTrades),
+				"time_window":  currentWindow,
+				"threshold":    adjustedThreshold,
 			}
 			sm.triggerManager.TriggerPumpDetection(symbol, priceChangePercent, signal.Confidence, metadata)
 
-			log.Printf("🚨 펌핑 감지: %s (1초 상승: +%.2f%%)", symbol, priceChangePercent)
+			log.Printf("🚨 펌핑 감지: %s (%d초간 실제 체결: +%.2f%%, 임계값: %.1f%%)",
+				symbol, currentWindow, priceChangePercent, adjustedThreshold)
 		}
 	}
 }
 
-// calculateOneSecondPriceChange 1초 가격 변동율 계산
-func (sm *SignalManager) calculateOneSecondPriceChange(orderbooks []*memory.OrderbookSnapshot) float64 {
+// calculatePriceChangeInWindow 시간 윈도우 내 가격 변동율 계산 (기존 calculateOneSecondPriceChange)
+func (sm *SignalManager) calculatePriceChangeInWindow(orderbooks []*memory.OrderbookSnapshot) float64 {
 	if len(orderbooks) < 2 {
 		return 0
 	}
 
-	// 1초 전과 현재 오더북의 중간가 비교
+	// 시간 윈도우 시작과 끝의 오더북 중간가 비교
 	first := orderbooks[0]
 	last := orderbooks[len(orderbooks)-1]
 
@@ -193,20 +310,26 @@ func (sm *SignalManager) calculateOneSecondPriceChange(orderbooks []*memory.Orde
 		return 0
 	}
 
-	// 중간가 계산
-	firstBid, _ := parseFloat(first.Bids[0][0])
-	firstAsk, _ := parseFloat(first.Asks[0][0])
+	// 중간가 계산 (에러 처리 추가)
+	firstBid, err1 := parseFloat(first.Bids[0][0])
+	firstAsk, err2 := parseFloat(first.Asks[0][0])
+	if err1 != nil || err2 != nil {
+		return 0 // 파싱 실패 시 변동 없음으로 처리
+	}
 	firstMid := (firstBid + firstAsk) / 2
 
-	lastBid, _ := parseFloat(last.Bids[0][0])
-	lastAsk, _ := parseFloat(last.Asks[0][0])
+	lastBid, err3 := parseFloat(last.Bids[0][0])
+	lastAsk, err4 := parseFloat(last.Asks[0][0])
+	if err3 != nil || err4 != nil {
+		return 0 // 파싱 실패 시 변동 없음으로 처리
+	}
 	lastMid := (lastBid + lastAsk) / 2
 
 	if firstMid == 0 {
 		return 0
 	}
 
-	// 1초간 가격 변동율 계산 (양수만 반환)
+	// 시간 윈도우 내 가격 변동율 계산 (양수만 반환)
 	changePercent := ((lastMid - firstMid) / firstMid) * 100
 	if changePercent < 0 {
 		return 0 // 하락은 무시
@@ -384,42 +507,52 @@ func (sm *SignalManager) calculateConfidence(score float64) float64 {
 
 // handleListingSignals 상장공시 신호 처리
 func (sm *SignalManager) handleListingSignals() {
-	for signal := range sm.listingCallback {
-		log.Printf("📢 상장공시 신호 수신: %s (신뢰도: %.2f%%)", signal.Symbol, signal.Confidence)
-
-		// 🚨 핵심: 상장공시 시그널 발생 시 ±60초 범위 데이터 즉시 저장
-		if err := sm.dataHandler.SaveListingSignalData(signal.Symbol, signal.Timestamp); err != nil {
-			log.Printf("❌ 상장공시 데이터 저장 실패: %v", err)
+	for {
+		select {
+		case <-sm.ctx.Done(): // 🔧 고루틴 누수 방지: context 확인
+			return
+		case signal := <-sm.listingCallback:
+			sm.processListingSignal(signal)
 		}
-
-		// ±60초 데이터 수집 (기존 로직 유지)
-		triggerTime := signal.Timestamp
-		startTime := triggerTime.Add(-60 * time.Second)
-		endTime := triggerTime.Add(60 * time.Second)
-
-		// 오더북 데이터 수집 (±60초)
-		orderbooks := sm.memManager.GetTimeRangeOrderbooks(signal.Symbol, startTime, endTime)
-
-		// 체결 데이터 수집 (±60초)
-		trades := sm.memManager.GetTimeRangeTrades(signal.Symbol, startTime, endTime)
-
-		log.Printf("📊 상장공시 데이터 수집: %s (오더북 %d개, 체결 %d개)",
-			signal.Symbol, len(orderbooks), len(trades))
-
-		// 트리거 발생 (스냅샷 저장 포함)
-		metadata := map[string]interface{}{
-			"exchange":     signal.Exchange,
-			"source":       signal.Source,
-			"confidence":   signal.Confidence,
-			"orderbooks":   len(orderbooks),
-			"trades":       len(trades),
-			"trigger_time": triggerTime,
-		}
-
-		sm.triggerManager.TriggerListingAnnouncement(
-			signal.Symbol, signal.Confidence, metadata,
-		)
 	}
+}
+
+// processListingSignal 상장공시 신호 처리 (🔧 고루틴 누수 방지를 위해 분리)
+func (sm *SignalManager) processListingSignal(signal ListingSignal) {
+	log.Printf("📢 상장공시 신호 수신: %s (신뢰도: %.2f%%)", signal.Symbol, signal.Confidence)
+
+	// 🚨 핵심: 상장공시 시그널 발생 시 ±60초 범위 데이터 즉시 저장
+	if err := sm.dataHandler.SaveListingSignalData(signal.Symbol, signal.Timestamp); err != nil {
+		log.Printf("❌ 상장공시 데이터 저장 실패: %v", err)
+	}
+
+	// ±60초 데이터 수집 (기존 로직 유지)
+	triggerTime := signal.Timestamp
+	startTime := triggerTime.Add(-60 * time.Second)
+	endTime := triggerTime.Add(60 * time.Second)
+
+	// 오더북 데이터 수집 (±60초)
+	orderbooks := sm.memManager.GetTimeRangeOrderbooks(signal.Symbol, startTime, endTime)
+
+	// 체결 데이터 수집 (±60초)
+	trades := sm.memManager.GetTimeRangeTrades(signal.Symbol, startTime, endTime)
+
+	log.Printf("📊 상장공시 데이터 수집: %s (오더북 %d개, 체결 %d개)",
+		signal.Symbol, len(orderbooks), len(trades))
+
+	// 트리거 발생 (스냅샷 저장 포함)
+	metadata := map[string]interface{}{
+		"exchange":     signal.Exchange,
+		"source":       signal.Source,
+		"confidence":   signal.Confidence,
+		"orderbooks":   len(orderbooks),
+		"trades":       len(trades),
+		"trigger_time": triggerTime,
+	}
+
+	sm.triggerManager.TriggerListingAnnouncement(
+		signal.Symbol, signal.Confidence, metadata,
+	)
 }
 
 // TriggerListingSignal 상장공시 신호 트리거 (외부에서 호출)
@@ -476,4 +609,156 @@ func parseFloat(s string) (float64, error) {
 	var result float64
 	_, err := fmt.Sscanf(s, "%f", &result)
 	return result, err
+}
+
+// filterTradesByTimeWindow 시간 윈도우 내의 체결 데이터 필터링
+func (sm *SignalManager) filterTradesByTimeWindow(trades []*memory.TradeData, windowSeconds int) []*memory.TradeData {
+	if len(trades) == 0 {
+		return []*memory.TradeData{}
+	}
+
+	cutoffTime := time.Now().Add(-time.Duration(windowSeconds) * time.Second)
+	var filteredTrades []*memory.TradeData
+
+	for _, trade := range trades {
+		if trade.Timestamp.After(cutoffTime) {
+			filteredTrades = append(filteredTrades, trade)
+		}
+	}
+
+	return filteredTrades
+}
+
+// calculatePriceChangeFromTrades 체결 데이터에서 가격 변동율 계산
+func (sm *SignalManager) calculatePriceChangeFromTrades(trades []*memory.TradeData) float64 {
+	if len(trades) < 2 {
+		return 0
+	}
+
+	// 시간순 정렬되어 있다고 가정하고 첫 번째와 마지막 체결 가격 비교
+	firstTrade := trades[0]
+	lastTrade := trades[len(trades)-1]
+
+	// 가격 파싱 (에러 처리 포함)
+	firstPrice, err1 := parseFloat(firstTrade.Price)
+	lastPrice, err2 := parseFloat(lastTrade.Price)
+
+	if err1 != nil || err2 != nil || firstPrice == 0 {
+		return 0
+	}
+
+	// 가격 변동율 계산 (양수만 반환)
+	changePercent := ((lastPrice - firstPrice) / firstPrice) * 100
+	if changePercent < 0 {
+		return 0 // 하락은 무시
+	}
+
+	return changePercent
+}
+
+// createTradeBasedPumpSignal 체결 기반 펌핑 시그널 생성
+func (sm *SignalManager) createTradeBasedPumpSignal(
+	symbol string,
+	priceChangePercent float64,
+	orderbooks []*memory.OrderbookSnapshot,
+	trades []*memory.TradeData,
+) *memory.AdvancedPumpSignal {
+	// 기본 펌핑 시그널
+	pumpSignal := memory.PumpSignal{
+		Symbol:         symbol,
+		Timestamp:      time.Now(),
+		CompositeScore: priceChangePercent, // 점수를 가격 변동율로 설정
+		Action:         sm.determineAction(priceChangePercent),
+		Confidence:     sm.calculateConfidence(priceChangePercent),
+		Volume:         sm.calculateVolumeFromTrades(trades),
+		PriceChange:    priceChangePercent, // 가격 변동율 직접 저장
+	}
+
+	// 최근 10개 체결 데이터 변환
+	recentTrades := make([]memory.TradeData, 0, 10)
+	start := len(trades) - 10
+	if start < 0 {
+		start = 0
+	}
+	for i := start; i < len(trades); i++ {
+		recentTrades = append(recentTrades, *trades[i])
+	}
+
+	// 고급 펌핑 시그널
+	advancedSignal := &memory.AdvancedPumpSignal{
+		PumpSignal:    pumpSignal,
+		OrderbookData: nil, // 체결 기반이므로 오더북은 선택적
+		TradeHistory:  recentTrades,
+		Indicators: map[string]float64{
+			"volume_change":  pumpSignal.Volume,
+			"price_change":   pumpSignal.PriceChange,
+			"trade_count":    float64(len(trades)),
+			"avg_trade_size": sm.calculateAvgTradeSize(trades),
+		},
+	}
+
+	// 오더북 데이터가 있으면 추가
+	if len(orderbooks) > 0 {
+		advancedSignal.OrderbookData = orderbooks[len(orderbooks)-1]
+		if advancedSignal.OrderbookData != nil {
+			advancedSignal.Indicators["orderbook_imbalance"] = sm.calculateOrderbookImbalance(advancedSignal.OrderbookData)
+		}
+	}
+
+	return advancedSignal
+}
+
+// calculateVolumeFromTrades 체결 데이터에서 거래량 계산
+func (sm *SignalManager) calculateVolumeFromTrades(trades []*memory.TradeData) float64 {
+	if len(trades) < 10 {
+		return 0
+	}
+
+	// 최근 절반과 이전 절반 거래량 비교
+	mid := len(trades) / 2
+	recent := trades[mid:]
+	previous := trades[:mid]
+
+	recentVolume := 0.0
+	for _, trade := range recent {
+		if qty, err := parseFloat(trade.Quantity); err == nil {
+			recentVolume += qty
+		}
+	}
+
+	previousVolume := 0.0
+	for _, trade := range previous {
+		if qty, err := parseFloat(trade.Quantity); err == nil {
+			previousVolume += qty
+		}
+	}
+
+	if previousVolume == 0 {
+		return 0
+	}
+
+	return ((recentVolume - previousVolume) / previousVolume) * 100
+}
+
+// calculateAvgTradeSize 평균 거래 크기 계산
+func (sm *SignalManager) calculateAvgTradeSize(trades []*memory.TradeData) float64 {
+	if len(trades) == 0 {
+		return 0
+	}
+
+	totalVolume := 0.0
+	validTrades := 0
+
+	for _, trade := range trades {
+		if qty, err := parseFloat(trade.Quantity); err == nil {
+			totalVolume += qty
+			validTrades++
+		}
+	}
+
+	if validTrades == 0 {
+		return 0
+	}
+
+	return totalVolume / float64(validTrades)
 }

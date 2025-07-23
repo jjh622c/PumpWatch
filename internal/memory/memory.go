@@ -75,7 +75,7 @@ type SymbolMemory struct {
 }
 
 // NewSymbolMemory 새로운 심볼 메모리 생성 (압축 기능 포함)
-func NewSymbolMemory(symbol string, maxOrderbooks, maxTrades int) *SymbolMemory {
+func NewSymbolMemory(symbol string, maxOrderbooks, maxTrades int, compressionIntervalSeconds int) *SymbolMemory {
 	return &SymbolMemory{
 		symbol:              symbol,
 		orderbooks:          make([]*OrderbookSnapshot, 0, maxOrderbooks),
@@ -85,7 +85,7 @@ func NewSymbolMemory(symbol string, maxOrderbooks, maxTrades int) *SymbolMemory 
 		maxTrades:           maxTrades,
 		lastCleanup:         time.Now(),
 		lastCompression:     time.Now(),
-		compressionInterval: 30 * time.Second, // 30초마다 압축
+		compressionInterval: time.Duration(compressionIntervalSeconds) * time.Second, // 🔧 config에서 읽어옴
 	}
 }
 
@@ -333,6 +333,14 @@ type Manager struct {
 	retentionMinutes          int
 	cleanupInterval           time.Duration
 
+	// 🔧 하드코딩 제거: config 설정들 추가
+	compressionIntervalSeconds int
+	heapWarningMB              float64
+	gcThresholdOrderbooks      int
+	gcThresholdTrades          int
+	maxGoroutines              int
+	monitoringIntervalSeconds  int
+
 	// 모니터링 카운터 (누적)
 	orderbookCounter int
 	tradeCounter     int
@@ -346,7 +354,8 @@ type Manager struct {
 }
 
 // NewManager 새 메모리 관리자 생성 (심볼별 관리)
-func NewManager(maxOrderbooks, maxTrades, maxSignals, retentionMinutes int, orderbookRetentionMinutes float64) *Manager {
+func NewManager(maxOrderbooks, maxTrades, maxSignals, retentionMinutes int, orderbookRetentionMinutes float64,
+	compressionIntervalSeconds int, heapWarningMB float64, gcThresholdOrderbooks, gcThresholdTrades, maxGoroutines, monitoringIntervalSeconds int) *Manager {
 	log.Printf("🧹 메모리 관리자 초기화 시작: 최대 오더북=%d, 체결=%d, 시그널=%d, 오더북보존시간=%.1f분, 체결보존시간=%d분",
 		maxOrderbooks, maxTrades, maxSignals, orderbookRetentionMinutes, retentionMinutes)
 
@@ -360,8 +369,15 @@ func NewManager(maxOrderbooks, maxTrades, maxSignals, retentionMinutes int, orde
 		maxTrades:                 maxTrades,
 		retentionMinutes:          retentionMinutes,
 		cleanupInterval:           time.Duration(retentionMinutes) * time.Minute,
-		orderbookCounter:          0,
-		tradeCounter:              0,
+		// 🔧 하드코딩 제거: config에서 읽어온 값들 설정
+		compressionIntervalSeconds: compressionIntervalSeconds,
+		heapWarningMB:              heapWarningMB,
+		gcThresholdOrderbooks:      gcThresholdOrderbooks,
+		gcThresholdTrades:          gcThresholdTrades,
+		maxGoroutines:              maxGoroutines,
+		monitoringIntervalSeconds:  monitoringIntervalSeconds,
+		orderbookCounter:           0,
+		tradeCounter:               0,
 		// 처리율 추적 초기화
 		lastStatsTime:      time.Now(),
 		lastOrderbookCount: 0,
@@ -396,7 +412,7 @@ func (mm *Manager) getOrCreateSymbolMemory(symbol string) *SymbolMemory {
 		return symbolMem
 	}
 
-	symbolMem := NewSymbolMemory(symbol, mm.maxOrderbooks, mm.maxTrades)
+	symbolMem := NewSymbolMemory(symbol, mm.maxOrderbooks, mm.maxTrades, mm.compressionIntervalSeconds) // 🔧 config 값 사용
 	mm.symbols[symbol] = symbolMem
 	log.Printf("🔧 새 심볼 메모리 생성: %s", symbol)
 	return symbolMem
@@ -413,7 +429,7 @@ func (mm *Manager) AddOrderbook(snapshot *OrderbookSnapshot) {
 		var memStats runtime.MemStats
 		runtime.ReadMemStats(&memStats)
 		heapMB := float64(memStats.HeapInuse) / 1024 / 1024
-		if heapMB > 30 {
+		if heapMB > mm.heapWarningMB { // 🔧 config 값 사용
 			log.Printf("📊 오더북 %d회: 힙=%.1fMB, 고루틴=%d개, 심볼=%d개",
 				mm.orderbookCounter, heapMB, runtime.NumGoroutine(), len(mm.symbols))
 		}
@@ -431,7 +447,7 @@ func (mm *Manager) AddTrade(trade *TradeData) {
 		var memStats runtime.MemStats
 		runtime.ReadMemStats(&memStats)
 		heapMB := float64(memStats.HeapInuse) / 1024 / 1024
-		if heapMB > 30 {
+		if heapMB > mm.heapWarningMB { // 🔧 config 값 사용
 			log.Printf("📊 체결 %d회: 힙=%.1fMB, 고루틴=%d개, 심볼=%d개",
 				mm.tradeCounter, heapMB, runtime.NumGoroutine(), len(mm.symbols))
 		}
@@ -489,18 +505,76 @@ func (mm *Manager) GetRecentOrderbooks(symbol string, count int) []*OrderbookSna
 	return orderbooks[len(orderbooks)-count:]
 }
 
-// GetRecentTrades 최근 N개의 체결 조회
+// GetRecentTrades 최근 N개의 체결 조회 (압축 데이터 포함)
 func (mm *Manager) GetRecentTrades(symbol string, count int) []*TradeData {
-	trades := mm.GetTrades(symbol)
-	if len(trades) == 0 {
+	mm.mu.RLock()
+	defer mm.mu.RUnlock()
+
+	symbolMem, exists := mm.symbols[symbol]
+	if !exists {
 		return []*TradeData{}
 	}
 
-	if count > len(trades) {
-		count = len(trades)
+	symbolMem.mu.RLock()
+	defer symbolMem.mu.RUnlock()
+
+	// 🔧 안전 제한: 요청 개수가 너무 크면 제한
+	safeCount := count
+	if safeCount > 500 { // 최대 500개로 제한
+		safeCount = 500
 	}
 
-	return trades[len(trades)-count:]
+	// 1단계: 원본 체결 데이터에서 먼저 수집
+	trades := symbolMem.trades
+	var result []*TradeData
+
+	// 최신 데이터부터 역순으로 수집
+	if len(trades) > 0 {
+		start := len(trades) - safeCount
+		if start < 0 {
+			start = 0
+		}
+		result = append(result, trades[start:]...)
+	}
+
+	// 2단계: 부족하면 압축된 데이터에서 보충
+	if len(result) < safeCount && len(symbolMem.compressedTrades) > 0 {
+		needed := safeCount - len(result)
+
+		// 압축된 데이터를 시간순으로 정렬하여 추가
+		var compressedData []*TradeData
+		for _, compressed := range symbolMem.compressedTrades {
+			// 압축된 데이터를 TradeData 형태로 변환
+			tradeData := &TradeData{
+				Symbol:    compressed.Symbol,
+				Price:     compressed.Price,
+				Quantity:  fmt.Sprintf("%.8f", compressed.TotalVolume),
+				Side:      "COMPRESSED", // 압축 데이터 표시
+				Timestamp: compressed.LastTime,
+				Exchange:  compressed.Exchange,
+				TradeID:   fmt.Sprintf("compressed_%s", compressed.Price),
+			}
+			compressedData = append(compressedData, tradeData)
+		}
+
+		// 시간순 정렬 (최신순)
+		if len(compressedData) > 0 {
+			// 간단한 정렬 (최신 데이터만 필요하므로)
+			if needed > len(compressedData) {
+				needed = len(compressedData)
+			}
+
+			// 압축 데이터는 앞쪽에 추가 (시간순)
+			result = append(compressedData[:needed], result...)
+		}
+	}
+
+	// 3단계: 요청된 개수만큼 반환 (최신순 유지)
+	if len(result) > safeCount {
+		result = result[len(result)-safeCount:]
+	}
+
+	return result
 }
 
 // GetTimeRangeOrderbooks 시간 범위 내 오더북 조회
@@ -752,7 +826,7 @@ func (mm *Manager) cleanup() {
 	}
 
 	// 강제 GC 실행 (임계값 대폭 감소)
-	if cleanedOrderbooks > 50 || cleanedTrades > 200 || heapMB > 100 {
+	if cleanedOrderbooks > mm.gcThresholdOrderbooks || cleanedTrades > mm.gcThresholdTrades || heapMB > mm.heapWarningMB*10 { // 🔧 config 값 사용
 		log.Printf("🧹 강제 GC 실행 중 (오더북: %d개, 체결: %d개, 힙: %.1fMB)...",
 			cleanedOrderbooks, cleanedTrades, heapMB)
 		runtime.GC()
@@ -805,7 +879,7 @@ func (mm *Manager) InitializeSymbol(symbol string) {
 	// 심볼이 이미 존재하는지 확인
 	if _, exists := mm.symbols[symbol]; !exists {
 		// 새 심볼에 대한 빈 슬라이스 초기화
-		mm.symbols[symbol] = NewSymbolMemory(symbol, mm.maxOrderbooks, mm.maxTrades)
+		mm.symbols[symbol] = NewSymbolMemory(symbol, mm.maxOrderbooks, mm.maxTrades, mm.compressionIntervalSeconds) // 🔧 config 값 사용
 		log.Printf("심볼 초기화 완료: %s", symbol)
 	}
 }

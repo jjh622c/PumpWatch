@@ -3,6 +3,7 @@ package filemanager
 import (
 	"bufio"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -27,6 +28,11 @@ type FileManager struct {
 
 	// 정기 flush 고루틴
 	flushInterval time.Duration
+
+	// 🔧 고루틴 누수 방지: 고루틴 관리 추가
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
 // FileHandler 파일 핸들러
@@ -51,6 +57,8 @@ type FileHandler struct {
 
 // NewFileManager 파일 관리자 생성
 func NewFileManager(baseDir string, maxFileSize int64, bufferSize int, useCompression bool) *FileManager {
+	ctx, cancel := context.WithCancel(context.Background()) // 🔧 고루틴 누수 방지
+
 	fm := &FileManager{
 		baseDir:        baseDir,
 		maxFileSize:    maxFileSize,
@@ -58,10 +66,16 @@ func NewFileManager(baseDir string, maxFileSize int64, bufferSize int, useCompre
 		useCompression: useCompression,
 		handlers:       make(map[string]*FileHandler),
 		flushInterval:  5 * time.Second,
+		ctx:            ctx,    // 🔧 고루틴 누수 방지
+		cancel:         cancel, // 🔧 고루틴 누수 방지
 	}
 
 	// 정기 flush 고루틴 시작
-	go fm.flushRoutine()
+	fm.wg.Add(1) // 🔧 고루틴 누수 방지
+	go func() {
+		defer fm.wg.Done()
+		fm.flushRoutine()
+	}()
 
 	return fm
 }
@@ -302,8 +316,13 @@ func (fm *FileManager) flushRoutine() {
 	ticker := time.NewTicker(fm.flushInterval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		fm.flushAll()
+	for {
+		select {
+		case <-fm.ctx.Done(): // 🔧 고루틴 누수 방지: context 확인
+			return
+		case <-ticker.C:
+			fm.flushAll()
+		}
 	}
 }
 
@@ -333,10 +352,35 @@ func (fm *FileManager) Close() {
 	fm.mu.Lock()
 	defer fm.mu.Unlock()
 
+	log.Printf("📁 파일 관리자 종료 시작")
+
+	// 🔧 고루틴 누수 방지: 컨텍스트 취소로 고루틴 정리
+	if fm.cancel != nil {
+		fm.cancel()
+	}
+
+	// 모든 고루틴 종료 대기 (타임아웃 설정)
+	done := make(chan struct{})
+	go func() {
+		fm.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		log.Printf("✅ 파일 관리자: 모든 고루틴 정리 완료")
+	case <-time.After(3 * time.Second):
+		log.Printf("⚠️ 파일 관리자: 고루틴 정리 타임아웃 (3초)")
+	}
+
+	// 모든 핸들러 정리
 	for key, handler := range fm.handlers {
 		handler.Close()
-		log.Printf("📁 파일 핸들러 닫기: %s", key)
+		log.Printf("📁 핸들러 닫기: %s", key)
 	}
+	fm.handlers = make(map[string]*FileHandler)
+
+	log.Printf("📁 파일 관리자 종료 완료")
 }
 
 // Close 파일 핸들러 닫기

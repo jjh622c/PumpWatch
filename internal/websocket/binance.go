@@ -37,6 +37,10 @@ type BinanceWebSocket struct {
 	// 지연 모니터링
 	latencyMonitor *latency.LatencyMonitor
 
+	// 🔧 하드코딩 제거: config 설정들 추가
+	maxSymbolsPerGroup    int
+	reportIntervalSeconds int
+
 	// 배치 통계 (성능 최적화)
 	batchStats struct {
 		mu             sync.Mutex
@@ -69,27 +73,37 @@ func NewBinanceWebSocket(
 	workerCount int,
 	bufferSize int,
 	latencyMonitor *latency.LatencyMonitor,
+	maxSymbolsPerGroup int, // 🔧 config 매개변수 추가
+	reportIntervalSeconds int, // 🔧 config 매개변수 추가
 ) *BinanceWebSocket {
 	ctx, cancel := context.WithCancel(context.Background())
 	bws := &BinanceWebSocket{
-		symbols:        symbols,
-		memManager:     memManager,
-		cacheManager:   cacheManager, // 제대로 설정
-		logger:         logger,       // 로거 주입
-		dataChannel:    make(chan OrderbookData, bufferSize),
-		tradeChannel:   make(chan TradeData, bufferSize),
-		workerCount:    workerCount,
-		bufferSize:     bufferSize,
-		ctx:            ctx,
-		cancel:         cancel,
-		latencyMonitor: latencyMonitor,
+		symbols:               symbols,
+		memManager:            memManager,
+		cacheManager:          cacheManager, // 제대로 설정
+		logger:                logger,       // 로거 주입
+		dataChannel:           make(chan OrderbookData, bufferSize),
+		tradeChannel:          make(chan TradeData, bufferSize),
+		workerCount:           workerCount,
+		bufferSize:            bufferSize,
+		ctx:                   ctx,
+		cancel:                cancel,
+		latencyMonitor:        latencyMonitor,
+		maxSymbolsPerGroup:    maxSymbolsPerGroup,    // 🔧 config 값 설정
+		reportIntervalSeconds: reportIntervalSeconds, // 🔧 config 값 설정
 	}
 
 	// 배치 통계 초기화
 	bws.batchStats.symbolStats = make(map[string]int64)
 	bws.batchStats.lastReport = time.Now()
-	bws.batchStats.reportInterval = 60 * time.Second // 1분마다 보고로 변경
-	go bws.symbolCountReportRoutine()                // 심볼 개수 보고 고루틴 시작 (배치 통계 대신)
+	bws.batchStats.reportInterval = time.Duration(reportIntervalSeconds) * time.Second // 🔧 config 값 사용
+
+	// 🔧 고루틴 누수 방지: wg에 추가하고 정리 보장
+	bws.wg.Add(1)
+	go func() {
+		defer bws.wg.Done()
+		bws.symbolCountReportRoutine() // 심볼 개수 보고 고루틴 시작
+	}()
 
 	return bws
 }
@@ -130,39 +144,69 @@ func (bws *BinanceWebSocket) Connect(ctx context.Context) error {
 }
 
 // Disconnect 연결 해제
-func (bws *BinanceWebSocket) Disconnect() error {
+func (bws *BinanceWebSocket) Disconnect() {
 	bws.mu.Lock()
-	defer bws.mu.Unlock()
-
 	if !bws.isConnected {
-		return nil
+		bws.mu.Unlock()
+		return
+	}
+	bws.isConnected = false
+	bws.mu.Unlock()
+
+	// 🔧 고루틴 누수 방지: 컨텍스트 취소로 모든 고루틴 정리
+	if bws.cancel != nil {
+		bws.cancel()
 	}
 
-	bws.cancel()
-
-	// 모든 연결 해제
+	// 모든 연결 닫기
 	for _, conn := range bws.connections {
 		if conn != nil {
 			conn.Close()
 		}
 	}
-	bws.connections = nil
 
-	bws.isConnected = false
+	// 🔧 고루틴 누수 방지: 모든 고루틴 종료 대기 (타임아웃 설정)
+	done := make(chan struct{})
+	go func() {
+		bws.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		if bws.logger != nil {
+			bws.logger.LogConnection("모든 고루틴 정리 완료")
+		}
+	case <-time.After(5 * time.Second):
+		if bws.logger != nil {
+			bws.logger.LogError("고루틴 정리 타임아웃 (5초)")
+		}
+	}
+
+	// 채널 정리 (논블로킹)
+	go func() {
+		for {
+			select {
+			case <-bws.dataChannel:
+			case <-bws.tradeChannel:
+			default:
+				return
+			}
+		}
+	}()
 
 	if bws.logger != nil {
-		bws.logger.LogConnection("바이낸스 WebSocket 연결 해제")
+		bws.logger.LogConnection("바이낸스 WebSocket 연결 해제 완료")
 	} else {
-		log.Printf("🔴 바이낸스 WebSocket 연결 해제")
+		log.Printf("🔴 바이낸스 WebSocket 연결 해제 완료")
 	}
-	return nil
 }
 
-// createStreamGroups 스트림 그룹 생성
+// createStreamGroups 스트림을 그룹으로 나누기 (바이낸스 WebSocket 제한: 1024개 스트림/연결)
 func (bws *BinanceWebSocket) createStreamGroups() [][]string {
-	// 바이낸스 제한: 최대 200개 스트림/연결
+	// 심볼당 2개 스트림(orderbook + trade)이므로 심볼 기준으로는 maxSymbolsPerGroup개/그룹
 	// 심볼당 2개 스트림(orderbook + trade)이므로 심볼 기준으로는 100개/그룹
-	const maxSymbolsPerGroup = 100 // 200 스트림 ÷ 2 = 100 심볼
+	maxSymbolsPerGroup := bws.maxSymbolsPerGroup // 🔧 config 값 사용
 
 	var groups [][]string
 	var currentGroup []string
@@ -176,15 +220,9 @@ func (bws *BinanceWebSocket) createStreamGroups() [][]string {
 		}
 	}
 
+	// 마지막 그룹 추가
 	if len(currentGroup) > 0 {
 		groups = append(groups, currentGroup)
-	}
-
-	if bws.logger != nil {
-		bws.logger.LogInfo("WebSocket 그룹 생성: %d개 그룹, 총 %d개 심볼", len(groups), len(bws.symbols))
-		for i, group := range groups {
-			bws.logger.LogInfo("그룹 %d: %d개 심볼 (%d개 스트림)", i+1, len(group), len(group)*2)
-		}
 	}
 
 	return groups
@@ -248,8 +286,12 @@ func (bws *BinanceWebSocket) connectToGroup(ctx context.Context, group []string,
 	bws.isConnected = true
 	bws.mu.Unlock()
 
-	// 메시지 처리 고루틴 시작 (각 연결마다)
-	go bws.handleMessages(ctx, conn, groupIndex)
+	// 메시지 처리 고루틴 시작
+	bws.wg.Add(1) // 🔧 고루틴 누수 방지
+	go func() {
+		defer bws.wg.Done()
+		bws.handleMessages(ctx, conn, groupIndex)
+	}()
 
 	return nil
 }

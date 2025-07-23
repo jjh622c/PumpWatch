@@ -44,7 +44,11 @@ type WebSocketConfig struct {
 	MaxBackoff           time.Duration `json:"max_backoff"`            // 최대 백오프 시간
 	KeepAliveInterval    time.Duration `json:"keep_alive_interval"`    // PING/PONG 간격
 	ReadTimeout          time.Duration `json:"read_timeout"`           // 읽기 타임아웃
-	WriteTimeout         time.Duration `json:"write_timeout"`          // 쓰기 타임아웃
+	WriteTimeout         time.Duration `json:"write_timeout"`
+	// 🔧 하드코딩 제거: WebSocket 관련 설정들 추가
+	MaxSymbolsPerGroup    int `json:"max_symbols_per_group"`
+	ReportIntervalSeconds int `json:"report_interval_seconds"`
+	MessageTimeoutSeconds int `json:"message_timeout_seconds"`
 }
 
 // MemoryConfig 메모리 관리 설정
@@ -54,6 +58,13 @@ type MemoryConfig struct {
 	MaxOrderbooksPerSymbol    int     `json:"max_orderbooks_per_symbol"`
 	MaxTradesPerSymbol        int     `json:"max_trades_per_symbol"`
 	CleanupIntervalMinutes    int     `json:"cleanup_interval_minutes"`
+	// 🔧 하드코딩 제거: 새로운 설정들 추가
+	CompressionIntervalSeconds int     `json:"compression_interval_seconds"`
+	HeapWarningMB              float64 `json:"heap_warning_mb"`
+	GCThresholdOrderbooks      int     `json:"gc_threshold_orderbooks"`
+	GCThresholdTrades          int     `json:"gc_threshold_trades"`
+	MaxGoroutines              int     `json:"max_goroutines"`
+	MonitoringIntervalSeconds  int     `json:"monitoring_interval_seconds"`
 }
 
 // StorageConfig 스토리지 설정
@@ -139,24 +150,33 @@ func LoadConfig(configPath string) (*Config, error) {
 			Host: "localhost",
 		},
 		WebSocket: WebSocketConfig{
-			Symbols:              []string{"BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "SOLUSDT"},
-			ReconnectInterval:    5 * time.Second,
-			HeartbeatInterval:    30 * time.Second,
-			WorkerCount:          16,
-			BufferSize:           1000,
-			MaxReconnectAttempts: 10,
-			ReconnectBackoff:     5 * time.Second,
-			MaxBackoff:           5 * time.Minute,
-			KeepAliveInterval:    30 * time.Second,
-			ReadTimeout:          60 * time.Second,
-			WriteTimeout:         10 * time.Second,
+			Symbols:               []string{"BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "SOLUSDT"},
+			ReconnectInterval:     5 * time.Second,
+			HeartbeatInterval:     30 * time.Second,
+			WorkerCount:           32,    // 16 → 32 (2배 증가)
+			BufferSize:            50000, // 1000 → 50000 (50배 증가)
+			MaxReconnectAttempts:  10,
+			ReconnectBackoff:      5 * time.Second,
+			MaxBackoff:            5 * time.Minute,
+			KeepAliveInterval:     30 * time.Second,
+			ReadTimeout:           60 * time.Second,
+			WriteTimeout:          10 * time.Second,
+			MaxSymbolsPerGroup:    100,
+			ReportIntervalSeconds: 60,
+			MessageTimeoutSeconds: 30,
 		},
 		Memory: MemoryConfig{
-			OrderbookRetentionMinutes: 60.0,
-			TradeRetentionMinutes:     60,
-			MaxOrderbooksPerSymbol:    1000,
-			MaxTradesPerSymbol:        1000,
-			CleanupIntervalMinutes:    5,
+			OrderbookRetentionMinutes:  60.0,
+			TradeRetentionMinutes:      60,
+			MaxOrderbooksPerSymbol:     1000,
+			MaxTradesPerSymbol:         1000,
+			CleanupIntervalMinutes:     5,
+			CompressionIntervalSeconds: 300,
+			HeapWarningMB:              100.0,
+			GCThresholdOrderbooks:      10000,
+			GCThresholdTrades:          10000,
+			MaxGoroutines:              1000,
+			MonitoringIntervalSeconds:  60,
 		},
 		Storage: StorageConfig{
 			BaseDir:       "./data",
@@ -168,7 +188,7 @@ func LoadConfig(configPath string) (*Config, error) {
 				Enabled:              true,
 				MinScore:             70.0,
 				VolumeThreshold:      1000000.0,
-				PriceChangeThreshold: 5.0,
+				PriceChangeThreshold: 3.0, // 5.0 → 3.0으로 변경
 				TimeWindowSeconds:    300,
 			},
 			Listing: ListingConfig{
@@ -181,7 +201,7 @@ func LoadConfig(configPath string) (*Config, error) {
 				Enabled:              true,
 				MinScore:             70.0,
 				VolumeThreshold:      1000000.0,
-				PriceChangeThreshold: 5.0,
+				PriceChangeThreshold: 3.0, // 5.0 → 3.0으로 변경
 				TimeWindowSeconds:    300,
 			},
 			Snapshot: SnapshotTriggerConfig{
