@@ -116,6 +116,11 @@ type PumpAlert struct {
 	WindowNs     int64
 	DetectedAtNs int64
 	LatencyNs    int32 // 감지 지연시간
+
+	// 🆕 펌핑 원인 체결 정보
+	FirstPrice uint64   // 윈도우 내 시작 가격
+	LastPrice  uint64   // 윈도우 내 최종 가격
+	PumpTrades []*Trade // 실제 펌핑을 일으킨 체결들 (BUY 위주)
 }
 
 // NewHFTPumpDetector HFT 펌핑 감지기 생성
@@ -214,11 +219,7 @@ func (hft *HFTPumpDetector) OnTradeReceivedFromMemory(memTrade *memory.TradeData
 		return
 	}
 
-	// 🔍 BTTCUSDT 디버그 로그 (임시)
-	if strings.Contains(memTrade.Symbol, "BTTC") {
-		log.Printf("🔍 [HFT DEBUG] BTTCUSDT 체결 수신: 가격=%s, 수량=%s, 사이드=%s",
-			memTrade.Price, memTrade.Quantity, memTrade.Side)
-	}
+	// 🔍 BTTCUSDT 디버그 로그 제거 (너무 빈번함)
 
 	// memory.TradeData를 HFT Trade로 변환
 	priceFloat, _ := strconv.ParseFloat(memTrade.Price, 64)
@@ -673,10 +674,7 @@ func (hft *HFTPumpDetector) addToRingBufferDirect(rb *RingBuffer, trade *Trade) 
 
 // detectPumpDirect 즉시 펌핑 감지 (최적화된 알고리즘)
 func (hft *HFTPumpDetector) detectPumpDirect(symbol string, trade *Trade) *PumpAlert {
-	// 🔍 BTTCUSDT 디버그 로그 (함수 진입 확인)
-	if strings.Contains(symbol, "BTTC") {
-		log.Printf("🔍 [HFT DIRECT] BTTCUSDT detectPumpDirect 호출: 가격=%d", trade.Price)
-	}
+	// 🔍 BTTCUSDT 디버그 로그 제거 (너무 빈번함)
 
 	// 🔥 초고속: 직접 감지 (워커 우회)
 	detectorIndex := hft.getDetectorIndex(symbol)
@@ -701,11 +699,6 @@ func (hft *HFTPumpDetector) detectPumpDirect(symbol string, trade *Trade) *PumpA
 		return nil
 	}
 
-	// 🔍 BTTCUSDT 진행 상황 디버그
-	if strings.Contains(symbol, "BTTC") {
-		log.Printf("🔍 [HFT DIRECT] BTTCUSDT 링버퍼 추가 전: detectorIndex=%d", detectorIndex)
-	}
-
 	// 🔥 링 버퍼에 즉시 추가
 	hft.addToRingBufferDirect(detector.ringBuf, trade)
 
@@ -713,11 +706,7 @@ func (hft *HFTPumpDetector) detectPumpDirect(symbol string, trade *Trade) *PumpA
 	now := trade.Timestamp
 	windowStart := now - detector.window
 
-	// 🔍 BTTCUSDT 스캔 시작 디버그
-	if strings.Contains(symbol, "BTTC") {
-		log.Printf("🔍 [HFT DIRECT] BTTCUSDT 스캔 시작: now=%d, windowStart=%d, window=%d",
-			now, windowStart, detector.window)
-	}
+	// 🔍 BTTCUSDT 디버그 로그 제거 (너무 빈번함)
 
 	return hft.scanRingBufferForPump(symbol, detector, now, windowStart)
 }
@@ -741,6 +730,9 @@ func (hft *HFTPumpDetector) scanRingBufferForPump(symbol string, sd *SymbolDetec
 	var firstPrice, lastPrice uint64
 	var tradeCount int32
 	found := false
+
+	// 🆕 펌핑 원인 체결들을 저장할 슬라이스
+	var pumpTrades []*Trade
 
 	// 🔥 역순 스캔 (최신 데이터부터) - uint64 언더플로우 방지
 	scanStart := head
@@ -771,6 +763,19 @@ func (hft *HFTPumpDetector) scanRingBufferForPump(symbol string, sd *SymbolDetec
 		}
 		firstPrice = trade.Price
 		tradeCount++
+
+		// 🆕 펌핑에 기여한 체결들 수집 (BUY 우선, 가격 상승 관련)
+		if len(pumpTrades) < 10 { // 최대 10개까지만 저장 (메모리 효율)
+			// 체결 데이터 복사 (포인터 안전성)
+			tradeCopy := &Trade{
+				Symbol:    trade.Symbol,
+				Price:     trade.Price,
+				Quantity:  trade.Quantity,
+				Timestamp: trade.Timestamp,
+				Side:      trade.Side,
+			}
+			pumpTrades = append(pumpTrades, tradeCopy)
+		}
 	}
 
 	if !found || tradeCount < 2 || firstPrice == 0 {
@@ -788,6 +793,17 @@ func (hft *HFTPumpDetector) scanRingBufferForPump(symbol string, sd *SymbolDetec
 	if strings.Contains(symbolStr, "BTTC") {
 		log.Printf("🔍 [HFT CALC] BTTCUSDT: firstPrice=%d, lastPrice=%d, priceChange=%d, threshold=%d",
 			firstPrice, lastPrice, priceChange, sd.threshold)
+
+		// 🔍 펌핑 원인 체결들 디버그
+		log.Printf("🔍 [HFT TRADES] BTTCUSDT: 펌핑 원인 체결 %d개 수집됨", len(pumpTrades))
+		for i, trade := range pumpTrades {
+			side := "BUY"
+			if trade.Side == 1 {
+				side = "SELL"
+			}
+			log.Printf("🔍 [HFT TRADE-%d] 가격=%d, 수량=%d, 사이드=%s",
+				i+1, trade.Price, trade.Quantity, side)
+		}
 	}
 
 	if priceChange >= sd.threshold {
@@ -798,6 +814,11 @@ func (hft *HFTPumpDetector) scanRingBufferForPump(symbol string, sd *SymbolDetec
 			TradeCount:   tradeCount,
 			WindowNs:     sd.window,
 			DetectedAtNs: now,
+
+			// 🆕 펌핑 원인 정보 추가
+			FirstPrice: firstPrice,
+			LastPrice:  lastPrice,
+			PumpTrades: pumpTrades,
 		}
 	}
 
@@ -860,13 +881,39 @@ func (hft *HFTPumpDetector) savePumpAlertToFile(alert *PumpAlert, symbol string,
 			"detected_at":          time.Unix(0, alert.DetectedAtNs).UTC().Format(time.RFC3339Nano),
 			"latency_microseconds": alert.LatencyNs / 1000,
 			"threshold":            hft.configThreshold, // 🔧 실제 config 임계값 사용
+
+			// 🆕 펌핑 원인 가격 정보
+			"first_price": float64(alert.FirstPrice) / 1e8, // uint64 → float64 변환
+			"last_price":  float64(alert.LastPrice) / 1e8,  // uint64 → float64 변환
 		},
 		"technical_data": map[string]interface{}{
 			"raw_price_change": alert.PriceChange,
 			"window_ns":        alert.WindowNs,
 			"detected_at_ns":   alert.DetectedAtNs,
 			"latency_ns":       alert.LatencyNs,
+			"first_price_raw":  alert.FirstPrice,
+			"last_price_raw":   alert.LastPrice,
 		},
+		// 🆕 실제 펌핑 원인 체결들
+		"pump_trades": func() []map[string]interface{} {
+			trades := make([]map[string]interface{}, 0, len(alert.PumpTrades))
+			for i, trade := range alert.PumpTrades {
+				if i >= 5 { // JSON 크기 제한 (최대 5개)
+					break
+				}
+				side := "BUY"
+				if trade.Side == 1 {
+					side = "SELL"
+				}
+				trades = append(trades, map[string]interface{}{
+					"price":     float64(trade.Price) / 1e8,
+					"quantity":  float64(trade.Quantity) / 1e8,
+					"side":      side,
+					"timestamp": time.Unix(0, trade.Timestamp).UTC().Format(time.RFC3339Nano),
+				})
+			}
+			return trades
+		}(),
 	}
 
 	// JSON 직렬화
