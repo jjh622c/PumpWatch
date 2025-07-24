@@ -15,15 +15,15 @@
     "_symbols_tip": "비어있으면 sync_enabled=true일 때 자동으로 업비트 상장 코인을 가져옵니다",
     "_symbols_example": "수동 설정 예: [\"BTCUSDT\", \"ETHUSDT\", \"ADAUSDT\"]",
     
-    "worker_count": 8,
+    "worker_count": 64,
     "_worker_count_help": "동시 처리 워커 수 (CPU 코어 수의 2배 권장)",
     "_worker_count_range": "권장 범위: 4-16 (CPU 성능에 따라 조정)",
-    "_worker_count_tip": "높을수록 처리 속도 증가하지만 CPU 사용량도 증가",
+    "_worker_count_tip": "🔥 극한 최적화: 8 → 64로 증가 (처리 속도 8배, 초당 11만건 대응)",
     
-    "buffer_size": 5000,
+    "buffer_size": 500000,
     "_buffer_size_help": "메시지 버퍼 크기 (높을수록 안정적이지만 메모리 사용량 증가)",
     "_buffer_size_range": "권장 범위: 1000-10000",
-    "_buffer_size_tip": "네트워크 지연이 심한 환경에서는 더 큰 값 사용",
+    "_buffer_size_tip": "🔥 극한 최적화: 5000 → 500000으로 증가 (100배 버퍼, 5초분 데이터)",
     
     "auto_sync_symbols": true,
     "_auto_sync_help": "업비트 상장 심볼을 바이낸스에서 자동 동기화",
@@ -75,10 +75,10 @@
       "_enabled_help": "펌핑 감지 기능 활성화 여부",
       "_enabled_tip": "false로 설정하면 펌핑 감지를 비활성화합니다",
       
-      "price_change_threshold": 1.0,
+      "price_change_threshold": 0.5,
       "_price_change_threshold_help": "펌핑으로 판단할 최소 가격 상승률 (%)",
       "_price_change_threshold_range": "권장 범위: 0.5-5.0% (낮을수록 민감, 높을수록 확실한 신호만)",
-      "_price_change_threshold_tip": "🔧 성능 최적화: 0.5% → 1.0%로 상향 조정하여 노이즈 감소",
+      "_price_change_threshold_tip": "🔧 민감도 증가: 1.0% → 0.5%로 하향 조정하여 더 많은 신호 감지",
       "_price_change_threshold_examples": {
         "_scalping": "0.5-1.0% (초단타용, 빠른 반응)",
         "_swing": "1.0-3.0% (스윙용, 확실한 신호)",

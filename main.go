@@ -13,6 +13,7 @@ import (
 	"noticepumpcatch/internal/cache"
 	"noticepumpcatch/internal/callback"
 	"noticepumpcatch/internal/config"
+	"noticepumpcatch/internal/hft"
 	"noticepumpcatch/internal/latency"
 	"noticepumpcatch/internal/logger"
 	"noticepumpcatch/internal/memory"
@@ -38,6 +39,7 @@ type Application struct {
 	latencyMonitor  *latency.LatencyMonitor
 	symbolSyncer    *syncmodule.SymbolSyncManager
 	perfMonitor     *monitor.PerformanceMonitor
+	hftDetector     *hft.HFTPumpDetector // 🔥 HFT 수준 펌핑 감지기
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -122,6 +124,12 @@ func (app *Application) Initialize() error {
 	app.callbackManager = callback.NewCallbackManager()
 	app.logger.LogSuccess("콜백 관리자 생성 완료")
 
+	// 🔥 HFT 펌핑 감지기 생성 (WebSocket 생성 전에 먼저!)
+	threshold := app.config.Signals.PumpDetection.PriceChangeThreshold
+	windowSeconds := app.config.Signals.PumpDetection.TimeWindowSeconds
+	app.hftDetector = hft.NewHFTPumpDetector(threshold, windowSeconds)
+	app.logger.LogSuccess("HFT 펌핑 감지기 생성 완료 (임계값: %.1f%%, 윈도우: %d초)", threshold, windowSeconds)
+
 	// 시그널 관리자 생성 (메모리 기반)
 	signalConfig := &signals.SignalConfig{
 		PumpDetection: signals.PumpDetectionConfig{
@@ -157,6 +165,7 @@ func (app *Application) Initialize() error {
 			// 🔧 하드코딩 제거: config에서 새로 추가된 값들 전달
 			app.config.WebSocket.MaxSymbolsPerGroup,
 			app.config.WebSocket.ReportIntervalSeconds,
+			app.hftDetector, // 🚀 이제 제대로 초기화된 HFT 감지기 전달!
 		)
 		app.logger.LogSuccess("WebSocket 클라이언트 생성 완료")
 	} else {
@@ -235,6 +244,7 @@ func (app *Application) Start() error {
 				// 🔧 하드코딩 제거: config에서 새로 추가된 값들 전달
 				app.config.WebSocket.MaxSymbolsPerGroup,
 				app.config.WebSocket.ReportIntervalSeconds,
+				app.hftDetector, // 🚀 HFT 수준 펌핑 감지기 전달
 			)
 			app.logger.LogSuccess("✅ WebSocket 클라이언트 생성 완료 (%d개 심볼)", len(syncedSymbols))
 		} else {
@@ -257,6 +267,13 @@ func (app *Application) Start() error {
 	}
 	app.logger.LogSuccess("WebSocket 연결 성공")
 
+	// 🔥 HFT 펌핑 감지 시작
+	if err := app.hftDetector.Start(); err != nil {
+		app.logger.LogError("HFT 펌핑 감지 시작 실패: %v", err)
+		return err
+	}
+	app.logger.LogSuccess("HFT 펌핑 감지 시작 완료")
+
 	// 시그널 감지 시작
 	app.signalManager.Start()
 	app.logger.LogSuccess("시그널 감지 시작")
@@ -274,6 +291,12 @@ func (app *Application) Stop() error {
 
 	// 컨텍스트 취소
 	app.cancel()
+
+	// 🔥 HFT 펌핑 감지 중지
+	if app.hftDetector != nil {
+		app.hftDetector.Stop()
+		app.logger.LogConnection("HFT 펌핑 감지 중지")
+	}
 
 	// 시그널 관리자 중지 (🔧 고루틴 누수 방지)
 	if app.signalManager != nil {

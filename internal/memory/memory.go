@@ -244,7 +244,7 @@ func (sm *SymbolMemory) parseFloat(s string) float64 {
 	return result
 }
 
-// Cleanup 심볼별 데이터 정리
+// Cleanup 심볼별 데이터 정리 (🔥 압축 데이터 정리 추가)
 func (sm *SymbolMemory) Cleanup(orderbookCutoff, tradeCutoff time.Time) (int, int) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -274,8 +274,59 @@ func (sm *SymbolMemory) Cleanup(orderbookCutoff, tradeCutoff time.Time) (int, in
 	}
 	sm.trades = validTrades
 
+	// 🔥 치명적 누수 해결: 압축 데이터 정리 추가
+	cleanedCompressed := 0
+	compressedCutoff := tradeCutoff.Add(-5 * time.Minute) // 압축 데이터는 더 오래 보존
+
+	for price, compressedTrade := range sm.compressedTrades {
+		// 너무 오래된 압축 데이터 제거
+		if compressedTrade.LastTime.Before(compressedCutoff) {
+			delete(sm.compressedTrades, price)
+			cleanedCompressed++
+		}
+	}
+
+	// 🔥 압축 데이터 개수 제한 (가격별 최대 1000개)
+	if len(sm.compressedTrades) > 1000 {
+		// 시간순으로 정렬하여 가장 오래된 것들 제거
+		type timePrice struct {
+			price string
+			time  time.Time
+		}
+
+		var sorted []timePrice
+		for price, compressed := range sm.compressedTrades {
+			sorted = append(sorted, timePrice{price: price, time: compressed.LastTime})
+		}
+
+		// 간단한 시간순 정렬 (최신 1000개만 유지)
+		for i := 0; i < len(sorted)-1000; i++ {
+			// 가장 오래된 것들부터 제거
+			oldestPrice := ""
+			oldestTime := time.Now()
+
+			for price, compressed := range sm.compressedTrades {
+				if compressed.LastTime.Before(oldestTime) {
+					oldestTime = compressed.LastTime
+					oldestPrice = price
+				}
+			}
+
+			if oldestPrice != "" {
+				delete(sm.compressedTrades, oldestPrice)
+				cleanedCompressed++
+			}
+		}
+	}
+
 	sm.lastCleanup = time.Now()
-	return cleanedOrderbooks, cleanedTrades
+
+	// 🔥 압축 정리 로그 (중요한 정리만)
+	if cleanedCompressed > 10 {
+		log.Printf("🧹 [%s] 압축 데이터 %d개 정리 (메모리 누수 방지)", sm.symbol, cleanedCompressed)
+	}
+
+	return cleanedOrderbooks, cleanedTrades + cleanedCompressed
 }
 
 // GetStats 심볼별 통계 조회 (압축 데이터 포함)
@@ -356,7 +407,7 @@ type Manager struct {
 // NewManager 새 메모리 관리자 생성 (심볼별 관리)
 func NewManager(maxOrderbooks, maxTrades, maxSignals, retentionMinutes int, orderbookRetentionMinutes float64,
 	compressionIntervalSeconds int, heapWarningMB float64, gcThresholdOrderbooks, gcThresholdTrades, maxGoroutines, monitoringIntervalSeconds int) *Manager {
-	log.Printf("🧹 메모리 관리자 초기화 시작: 최대 오더북=%d, 체결=%d, 시그널=%d, 오더북보존시간=%.1f분, 체결보존시간=%d분",
+	log.Printf("�� 메모리 관리자 초기화 시작: 최대 오더북=%d, 체결=%d, 시그널=%d, 오더북보존시간=%.1f분, 체결보존시간=%d분",
 		maxOrderbooks, maxTrades, maxSignals, orderbookRetentionMinutes, retentionMinutes)
 
 	mm := &Manager{
@@ -703,7 +754,7 @@ func (mm *Manager) cleanupRoutine() {
 	log.Printf("🧹 메모리 정리 고루틴 진입 (%v마다 실행, 오더북=%.1f분, 체결=%d분 보존)",
 		cleanupInterval, mm.orderbookRetentionMinutes, mm.tradeRetentionMinutes)
 
-	// 즉시 한 번 정리 실행
+	// 🧹 즉시 한 번 정리 실행
 	log.Printf("🧹 초기 메모리 정리 실행...")
 	mm.cleanup()
 

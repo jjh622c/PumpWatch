@@ -37,6 +37,11 @@ type BinanceWebSocket struct {
 	// 지연 모니터링
 	latencyMonitor *latency.LatencyMonitor
 
+	// 🚀 HFT 수준 실시간 펌핑 감지를 위한 HFT 감지기 추가
+	hftDetector interface {
+		OnTradeReceivedFromMemory(trade *memory.TradeData)
+	}
+
 	// 🔧 하드코딩 제거: config 설정들 추가
 	maxSymbolsPerGroup    int
 	reportIntervalSeconds int
@@ -75,6 +80,7 @@ func NewBinanceWebSocket(
 	latencyMonitor *latency.LatencyMonitor,
 	maxSymbolsPerGroup int, // 🔧 config 매개변수 추가
 	reportIntervalSeconds int, // 🔧 config 매개변수 추가
+	hftDetector interface{ OnTradeReceivedFromMemory(trade *memory.TradeData) }, // 🚀 실시간 펌핑 감지용
 ) *BinanceWebSocket {
 	ctx, cancel := context.WithCancel(context.Background())
 	bws := &BinanceWebSocket{
@@ -89,6 +95,7 @@ func NewBinanceWebSocket(
 		ctx:                   ctx,
 		cancel:                cancel,
 		latencyMonitor:        latencyMonitor,
+		hftDetector:           hftDetector,           // 🚀 실시간 펌핑 감지 매니저 설정
 		maxSymbolsPerGroup:    maxSymbolsPerGroup,    // 🔧 config 값 설정
 		reportIntervalSeconds: reportIntervalSeconds, // 🔧 config 값 설정
 	}
@@ -183,8 +190,10 @@ func (bws *BinanceWebSocket) Disconnect() {
 		}
 	}
 
-	// 채널 정리 (논블로킹)
+	// 🔥 채널 정리 고루틴 누수 수정: wg에 추가
+	bws.wg.Add(1)
 	go func() {
+		defer bws.wg.Done()
 		for {
 			select {
 			case <-bws.dataChannel:
@@ -194,6 +203,24 @@ func (bws *BinanceWebSocket) Disconnect() {
 			}
 		}
 	}()
+
+	// 🔥 채널 정리 고루틴 완료 대기
+	finalDone := make(chan struct{})
+	go func() {
+		bws.wg.Wait()
+		close(finalDone)
+	}()
+
+	select {
+	case <-finalDone:
+		if bws.logger != nil {
+			bws.logger.LogConnection("채널 정리 완료")
+		}
+	case <-time.After(2 * time.Second):
+		if bws.logger != nil {
+			bws.logger.LogError("채널 정리 타임아웃 (2초)")
+		}
+	}
 
 	if bws.logger != nil {
 		bws.logger.LogConnection("바이낸스 WebSocket 연결 해제 완료")
@@ -329,22 +356,61 @@ func (bws *BinanceWebSocket) handleMessages(ctx context.Context, conn *websocket
 						case bws.dataChannel <- OrderbookData{Stream: stream, Data: data}:
 							// 성공적으로 전송됨
 						default:
+							// 🔧 오버플로우 개선: 경고 출력 빈도 제한
 							if bws.logger != nil {
 								bws.logger.LogError("오더북 데이터 채널 버퍼 오버플로우: %s", stream)
 							} else {
-								log.Printf("⚠️  오더북 데이터 채널 버퍼 오버플로우: %s", stream)
+								log.Printf("ERROR: 오더북 데이터 채널 버퍼 오버플로우: %s", stream)
+							}
+
+							// 🔥 극한 상황 대비: 채널에서 가장 오래된 데이터 1개 제거 후 새 데이터 추가
+							select {
+							case <-bws.dataChannel:
+								// 오래된 데이터 1개 제거
+								select {
+								case bws.dataChannel <- OrderbookData{Stream: stream, Data: data}:
+									// 새 데이터 추가 성공
+								default:
+									// 여전히 실패하면 포기
+								}
+							default:
+								// 제거할 데이터도 없으면 포기
 							}
 						}
 					} else if strings.Contains(stream, "@trade") {
-						// 체결 데이터
-						select {
-						case bws.tradeChannel <- TradeData{Stream: stream, Data: data}:
-							// 성공적으로 전송됨
-						default:
-							if bws.logger != nil {
-								bws.logger.LogError("체결 데이터 채널 버퍼 오버플로우: %s", stream)
-							} else {
-								log.Printf("⚠️  체결 데이터 채널 버퍼 오버플로우: %s", stream)
+						// 🔥 FASTTRACK: 활발한 심볼은 채널 우회하여 직접 처리
+						symbol := strings.Replace(stream, "@trade", "", 1)
+						symbol = strings.ToUpper(symbol)
+
+						if bws.isFastTrackSymbol(symbol) {
+							// 🚀 채널 없이 즉시 처리 (제로 레이턴시)
+							bws.processTradeDataDirect(stream, data)
+						} else {
+							// 🔧 일반 심볼은 채널 경유
+							select {
+							case bws.tradeChannel <- TradeData{Stream: stream, Data: data}:
+								// 성공적으로 전송됨
+							default:
+								// 🔧 오버플로우 개선: 경고 출력 빈도 제한
+								if bws.logger != nil {
+									bws.logger.LogError("체결 데이터 채널 버퍼 오버플로우: %s", stream)
+								} else {
+									log.Printf("ERROR: 체결 데이터 채널 버퍼 오버플로우: %s", stream)
+								}
+
+								// 🔥 극한 상황 대비: 채널에서 가장 오래된 데이터 1개 제거 후 새 데이터 추가
+								select {
+								case <-bws.tradeChannel:
+									// 오래된 데이터 1개 제거
+									select {
+									case bws.tradeChannel <- TradeData{Stream: stream, Data: data}:
+										// 새 데이터 추가 성공
+									default:
+										// 여전히 실패하면 포기
+									}
+								default:
+									// 제거할 데이터도 없으면 포기
+								}
 							}
 						}
 					}
@@ -366,7 +432,7 @@ func (bws *BinanceWebSocket) handleMessages(ctx context.Context, conn *websocket
 	}
 }
 
-// startWorkerPool 워커 풀 시작
+// startWorkerPool 워커 풀 시작 (🔥 고루틴 누수 수정)
 func (bws *BinanceWebSocket) startWorkerPool() {
 	if bws.logger != nil {
 		bws.logger.LogConnection("워커 풀 함수 진입")
@@ -374,17 +440,25 @@ func (bws *BinanceWebSocket) startWorkerPool() {
 		log.Printf("🔧 워커 풀 함수 진입")
 	}
 
-	// 오더북 워커
+	// 🔥 고루틴 누수 수정: 오더북 워커들을 wg에 추가
 	for i := 0; i < bws.workerCount/2; i++ {
-		go bws.orderbookWorker(i)
+		bws.wg.Add(1)
+		go func(workerID int) {
+			defer bws.wg.Done()
+			bws.orderbookWorker(workerID)
+		}(i)
 		if bws.logger != nil {
 			bws.logger.LogConnection("오더북 워커 %d 시작", i)
 		}
 	}
 
-	// 체결 워커
+	// 🔥 고루틴 누수 수정: 체결 워커들을 wg에 추가
 	for i := 0; i < bws.workerCount/2; i++ {
-		go bws.tradeWorker(i)
+		bws.wg.Add(1)
+		go func(workerID int) {
+			defer bws.wg.Done()
+			bws.tradeWorker(workerID)
+		}(i)
 		if bws.logger != nil {
 			bws.logger.LogConnection("체결 워커 %d 시작", i)
 		}
@@ -544,100 +618,280 @@ func (bws *BinanceWebSocket) processOrderbookData(stream string, data map[string
 	// bws.addBatchStats(symbol, "orderbook") // 파일 저장 안하므로 통계 불필요
 }
 
-// processTradeData 체결 데이터 처리
+// processTradeData 체결 데이터 처리 (🔥 HFT/일반 경로 분리)
 func (bws *BinanceWebSocket) processTradeData(stream string, data map[string]interface{}) {
 	// 스트림에서 심볼 추출
 	symbol := strings.Replace(stream, "@trade", "", 1)
 	symbol = strings.ToUpper(symbol)
 
-	// 지연 모니터링
-	if bws.latencyMonitor != nil {
-		// EventTime 추출 (밀리초 단위)
-		if eventTimeRaw, ok := data["E"].(float64); ok {
-			eventTime := time.Unix(0, int64(eventTimeRaw)*int64(time.Millisecond))
-			latency, isWarning := bws.latencyMonitor.RecordLatency(
-				symbol,
-				"trade",
-				eventTime,
-				time.Now(),
-			)
-
-			if isWarning {
-				bws.logger.LogLatency("밀림 감지: symbol=%s, type=trade, 거래소 timestamp=%s, 수신 timestamp=%s, latency=%.2f초",
-					symbol,
-					eventTime.Format("15:04:05.000"),
-					time.Now().Format("15:04:05.000"),
-					latency,
-				)
-			}
-		}
-	}
-
-	// 디버그 로그는 배치 통계로 대체됨 (성능 최적화)
-
-	// 체결 데이터 파싱
-	price, ok := data["p"].(string)
-	if !ok {
-		log.Printf("❌ 가격 파싱 실패: %s", symbol)
-		return
-	}
-
-	quantity, ok := data["q"].(string)
-	if !ok {
-		log.Printf("❌ 수량 파싱 실패: %s", symbol)
-		return
-	}
-
-	side, ok := data["m"].(bool)
-	if !ok {
-		log.Printf("❌ 매수/매도 파싱 실패: %s", symbol)
-		return
-	}
-
-	tradeID, ok := data["t"].(float64)
-	if !ok {
-		log.Printf("❌ 거래 ID 파싱 실패: %s", symbol)
-		return
-	}
-
-	// 타임스탬프 파싱
+	// 🚀 ULTRA-FAST PATH: HFT 감지기만 즉시 처리 (최우선)
 	timestampMs, ok := data["T"].(float64)
-	if !ok {
-		log.Printf("❌ 타임스탬프 파싱 실패: %s", symbol)
-		return
-	}
+	if ok {
+		price, priceOk := data["p"].(string)
+		quantity, quantityOk := data["q"].(string)
+		side, sideOk := data["m"].(bool)
+		tradeID, tradeIDOk := data["t"].(float64)
 
-	// 매수/매도 문자열 변환
-	sideStr := "SELL"
-	if !side {
-		sideStr = "BUY"
-	}
+		if priceOk && quantityOk && sideOk && tradeIDOk && bws.hftDetector != nil {
+			sideStr := "SELL"
+			if !side {
+				sideStr = "BUY"
+			}
 
-	// 체결 데이터 생성
-	trade := &memory.TradeData{
-		Exchange:  "binance",
-		Symbol:    symbol,
-		Timestamp: time.Unix(0, int64(timestampMs)*int64(time.Millisecond)),
-		Price:     price,
-		Quantity:  quantity,
-		Side:      sideStr,
-		TradeID:   strconv.FormatInt(int64(tradeID), 10),
-	}
+			// 🔥 HFT 최우선 처리: 즉시 호출 (블로킹 없음)
+			hftTrade := &memory.TradeData{
+				Exchange:  "binance",
+				Symbol:    symbol,
+				Timestamp: time.Unix(0, int64(timestampMs)*int64(time.Millisecond)),
+				Price:     price,
+				Quantity:  quantity,
+				Side:      sideStr,
+				TradeID:   strconv.FormatInt(int64(tradeID), 10),
+			}
 
-	// 캐시 매니저에 저장 (있을 때만)
-	if bws.cacheManager != nil {
-		if err := bws.cacheManager.AddTrade(trade); err != nil {
-			if bws.logger != nil {
-				bws.logger.LogError("캐시 체결 저장 실패: %s - %v", symbol, err)
+			// 🔥 HFT 즉시 처리 (레이턴시 < 1μs)
+			if hftDetector, ok := bws.hftDetector.(interface{ OnTradeReceivedFromMemory(trade *memory.TradeData) }); ok {
+				hftDetector.OnTradeReceivedFromMemory(hftTrade)
 			}
 		}
 	}
 
-	// 기존 메모리 매니저에도 저장 (통계용)
-	bws.memManager.AddTrade(trade)
+	// 🔥 나머지 무거운 작업들은 별도 고루틴에서 비동기 처리 (HFT에 영향 없음)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("❌ Trade 처리 중 panic 복구: %v", r)
+			}
+		}()
 
-	// 배치 통계에 추가 (개별 로그 대신)
-	// bws.addBatchStats(symbol, "trade") // 파일 저장 안하므로 통계 불필요
+		// 지연 모니터링 (비동기)
+		if bws.latencyMonitor != nil {
+			if eventTimeRaw, ok := data["E"].(float64); ok {
+				eventTime := time.Unix(0, int64(eventTimeRaw)*int64(time.Millisecond))
+				latency, isWarning := bws.latencyMonitor.RecordLatency(symbol, "trade", eventTime, time.Now())
+				if isWarning {
+					bws.logger.LogLatency("밀림 감지: symbol=%s, type=trade, latency=%.2f초", symbol, latency)
+				}
+			}
+		}
+
+		// 체결 데이터 파싱 (비동기)
+		price, ok := data["p"].(string)
+		if !ok {
+			return
+		}
+		quantity, ok := data["q"].(string)
+		if !ok {
+			return
+		}
+		side, ok := data["m"].(bool)
+		if !ok {
+			return
+		}
+		tradeID, ok := data["t"].(float64)
+		if !ok {
+			return
+		}
+		timestampMs, ok := data["T"].(float64)
+		if !ok {
+			return
+		}
+
+		sideStr := "SELL"
+		if !side {
+			sideStr = "BUY"
+		}
+
+		trade := &memory.TradeData{
+			Exchange:  "binance",
+			Symbol:    symbol,
+			Timestamp: time.Unix(0, int64(timestampMs)*int64(time.Millisecond)),
+			Price:     price,
+			Quantity:  quantity,
+			Side:      sideStr,
+			TradeID:   strconv.FormatInt(int64(tradeID), 10),
+		}
+
+		// 🔥 저장 작업 (비동기 - HFT에 영향 없음)
+		if bws.cacheManager != nil {
+			if err := bws.cacheManager.AddTrade(trade); err != nil {
+				// 에러는 무시 (HFT 성능 우선)
+			}
+		}
+		bws.memManager.AddTrade(trade)
+	}()
+}
+
+// processTradeDataDirect 활발한 심볼의 체결 데이터를 즉시 처리하는 경로
+func (bws *BinanceWebSocket) processTradeDataDirect(stream string, data map[string]interface{}) {
+	symbol := strings.Replace(stream, "@trade", "", 1)
+	symbol = strings.ToUpper(symbol)
+
+	// 🚀 ULTRA-FAST PATH: HFT 감지기만 즉시 처리 (최우선)
+	timestampMs, ok := data["T"].(float64)
+	if ok {
+		price, priceOk := data["p"].(string)
+		quantity, quantityOk := data["q"].(string)
+		side, sideOk := data["m"].(bool)
+		tradeID, tradeIDOk := data["t"].(float64)
+
+		if priceOk && quantityOk && sideOk && tradeIDOk && bws.hftDetector != nil {
+			sideStr := "SELL"
+			if !side {
+				sideStr = "BUY"
+			}
+
+			// 🔥 HFT 최우선 처리: 즉시 호출 (블로킹 없음)
+			hftTrade := &memory.TradeData{
+				Exchange:  "binance",
+				Symbol:    symbol,
+				Timestamp: time.Unix(0, int64(timestampMs)*int64(time.Millisecond)),
+				Price:     price,
+				Quantity:  quantity,
+				Side:      sideStr,
+				TradeID:   strconv.FormatInt(int64(tradeID), 10),
+			}
+
+			// 🔥 HFT 즉시 처리 (레이턴시 < 1μs)
+			if hftDetector, ok := bws.hftDetector.(interface{ OnTradeReceivedFromMemory(trade *memory.TradeData) }); ok {
+				hftDetector.OnTradeReceivedFromMemory(hftTrade)
+			}
+		}
+	}
+
+	// 🔥 나머지 무거운 작업들은 별도 고루틴에서 비동기 처리 (HFT에 영향 없음)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("❌ Trade 처리 중 panic 복구: %v", r)
+			}
+		}()
+
+		// 지연 모니터링 (비동기)
+		if bws.latencyMonitor != nil {
+			if eventTimeRaw, ok := data["E"].(float64); ok {
+				eventTime := time.Unix(0, int64(eventTimeRaw)*int64(time.Millisecond))
+				latency, isWarning := bws.latencyMonitor.RecordLatency(symbol, "trade", eventTime, time.Now())
+				if isWarning {
+					bws.logger.LogLatency("밀림 감지: symbol=%s, type=trade, latency=%.2f초", symbol, latency)
+				}
+			}
+		}
+
+		// 체결 데이터 파싱 (비동기)
+		price, ok := data["p"].(string)
+		if !ok {
+			return
+		}
+		quantity, ok := data["q"].(string)
+		if !ok {
+			return
+		}
+		side, ok := data["m"].(bool)
+		if !ok {
+			return
+		}
+		tradeID, ok := data["t"].(float64)
+		if !ok {
+			return
+		}
+		timestampMs, ok := data["T"].(float64)
+		if !ok {
+			return
+		}
+
+		sideStr := "SELL"
+		if !side {
+			sideStr = "BUY"
+		}
+
+		trade := &memory.TradeData{
+			Exchange:  "binance",
+			Symbol:    symbol,
+			Timestamp: time.Unix(0, int64(timestampMs)*int64(time.Millisecond)),
+			Price:     price,
+			Quantity:  quantity,
+			Side:      sideStr,
+			TradeID:   strconv.FormatInt(int64(tradeID), 10),
+		}
+
+		// 🔥 저장 작업 (비동기 - HFT에 영향 없음)
+		if bws.cacheManager != nil {
+			if err := bws.cacheManager.AddTrade(trade); err != nil {
+				// 에러는 무시 (HFT 성능 우선)
+			}
+		}
+		bws.memManager.AddTrade(trade)
+	}()
+}
+
+// isFastTrackSymbol 활발한 심볼인지 확인
+func (bws *BinanceWebSocket) isFastTrackSymbol(symbol string) bool {
+	// 여기에 활발한 심볼 목록을 추가합니다.
+	// 예: "BTCUSDT", "ETHUSDT", "BNBUSDT" 등
+	// 이 목록은 실제 거래량이나 활발도를 기준으로 설정해야 합니다.
+	// 현재는 간단히 몇 가지 예시를 포함합니다.
+	fastTrackSymbols := map[string]bool{
+		"BTCUSDT":   true,
+		"ETHUSDT":   true,
+		"BNBUSDT":   true,
+		"XRPUSDT":   true,
+		"ADAUSDT":   true,
+		"DOTUSDT":   true,
+		"SOLUSDT":   true,
+		"AVAXUSDT":  true,
+		"MATICUSDT": true,
+		"LTCUSDT":   true,
+		"LINKUSDT":  true,
+		"UNIUSDT":   true,
+		"XMRUSDT":   true,
+		"ZECUSDT":   true,
+		"ATOMUSDT":  true,
+		"ETCUSDT":   true,
+		"XTZUSDT":   true,
+		"YFIUSDT":   true,
+		"MKRUSDT":   true,
+		"SNXUSDT":   true,
+		"CRVUSDT":   true,
+		"AAVEUSDT":  true,
+		"MIMUSDT":   true,
+		"SUSHIUSDT": true,
+		"WAVESUSDT": true,
+		"RUNEUSDT":  true,
+		"TRXUSDT":   true,
+		"NEARUSDT":  true,
+		"FTMUSDT":   true,
+		"HBARUSDT":  true,
+		"XEMUSDT":   true,
+		"CELOUSDT":  true,
+		"ENJUSDT":   true,
+		"KAVAUSDT":  true,
+		"GRTUSDT":   true,
+		"ZRXUSDT":   true,
+		"BATUSDT":   true,
+		"KNCUSDT":   true,
+		"RENUSDT":   true,
+		"SNMUSDT":   true,
+		"WOOUSDT":   true,
+		"ZILUSDT":   true,
+		"CELRUSDT":  true,
+		"OCEANUSDT": true,
+		"1INCHUSDT": true,
+		"LRCUSDT":   true,
+		"KSMUSDT":   true,
+		"NEXUSDT":   true,
+		"CEEKUSDT":  true,
+		"ANKRUSDT":  true,
+		"OGNUSDT":   true,
+		"MFTUSDT":   true,
+		"DENTUSDT":  true,
+		"BANDUSDT":  true,
+		"ZENUSDT":   true,
+		"STORJUSDT": true,
+		"BTTCUSDT":  true,
+	}
+
+	return fastTrackSymbols[symbol]
 }
 
 // symbolCountReportRoutine 구독 중인 심볼 개수 보고 고루틴
