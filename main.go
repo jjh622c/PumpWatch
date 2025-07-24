@@ -392,34 +392,30 @@ func (app *Application) printSystemStats() {
 
 	// 트리거 통계
 	triggerStats := app.triggerManager.GetStats()
-	app.logger.LogTrigger("트리거: 총 %v개, 오늘 %v개",
+	app.logger.LogInfo("트리거: 총 %v개, 오늘 %v개",
 		triggerStats.TotalTriggers, triggerStats.DailyTriggerCount)
 
 	// 시그널 통계
 	signalStats := app.signalManager.GetSignalStats()
-	app.logger.LogSignal("시그널: 총 %v개, 펌핑 %v개, 평균점수 %.2f",
+	app.logger.LogInfo("시그널: 총 %v개, 펌핑 %v개, 평균점수 %.2f",
 		signalStats["total_signals"], signalStats["pump_signals"], signalStats["avg_score"])
 
 	// 스토리지 통계
 	storageStats := app.storageManager.GetStorageStats()
-	app.logger.LogStorage("스토리지: 시그널 %v개, 오더북 %v개, 체결 %v개, 스냅샷 %v개",
+	app.logger.LogInfo("스토리지: 시그널 %v개, 오더북 %v개, 체결 %v개, 스냅샷 %v개",
 		storageStats["signals_count"], storageStats["orderbooks_count"],
 		storageStats["trades_count"], storageStats["snapshots_count"])
 
 	// 콜백 통계
 	callbackStats := app.callbackManager.GetCallbackStats()
-	app.logger.LogCallback("콜백: 상장공시 %v개 등록",
+	app.logger.LogInfo("콜백: 상장공시 %v개 등록",
 		callbackStats["listing_callbacks"])
 
 	// 상태 요약 출력 (콘솔에만)
 	app.logger.PrintStatusSummary(stats)
 }
 
-// TriggerListingSignal 상장공시 신호 트리거 (외부에서 호출)
-func (app *Application) TriggerListingSignal(symbol, exchange, source string, confidence float64) {
-	app.callbackManager.TriggerListingAnnouncement(symbol, exchange, source, confidence)
-	app.logger.LogCallback("상장공시 신호 수동 트리거: %s (신뢰도: %.2f%%)", symbol, confidence)
-}
+
 
 func main() {
 	// 🛡️ 패닉 복구 메커니즘 설정

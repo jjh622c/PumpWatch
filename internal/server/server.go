@@ -329,11 +329,10 @@ func (s *Server) generateDashboardHTML() string {
             <div id="recent-signals" class="signals">로딩 중...</div>
         </div>
         
-        <div class="controls">
-            <button class="btn btn-primary" onclick="restartSystem()">🔄 재시작</button>
-            <button class="btn btn-warning" onclick="testNotification()">📤 알림 테스트</button>
-            <button class="btn btn-danger" onclick="stopSystem()">⏹️ 정지</button>
-        </div>
+                    <div class="controls">
+                <button class="btn btn-primary" onclick="restartSystem()">🔄 재시작</button>
+                <button class="btn btn-danger" onclick="stopSystem()">⏹️ 정지</button>
+            </div>
     </div>
 
     <script>
@@ -482,12 +481,7 @@ func (s *Server) generateDashboardHTML() string {
             }
         }
         
-        function testNotification() {
-            fetch('/api/test-notification', { method: 'POST' })
-                .then(response => response.json())
-                .then(data => alert('알림 테스트가 전송되었습니다.'))
-                .catch(error => console.error('알림 테스트 실패:', error));
-        }
+
         
         function stopSystem() {
             if (confirm('정말로 시스템을 정지하시겠습니까?')) {

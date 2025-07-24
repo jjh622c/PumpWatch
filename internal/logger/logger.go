@@ -211,25 +211,7 @@ func (l *Logger) LogPerformance(format string, args ...interface{}) {
 	l.log(INFO, format, args...)
 }
 
-// LogTrigger 트리거 관련 로그 (INFO 레벨)
-func (l *Logger) LogTrigger(format string, args ...interface{}) {
-	l.log(INFO, format, args...)
-}
 
-// LogSignal 시그널 관련 로그 (INFO 레벨)
-func (l *Logger) LogSignal(format string, args ...interface{}) {
-	l.log(INFO, format, args...)
-}
-
-// LogStorage 스토리지 관련 로그 (INFO 레벨)
-func (l *Logger) LogStorage(format string, args ...interface{}) {
-	l.log(INFO, format, args...)
-}
-
-// LogCallback 콜백 관련 로그 (INFO 레벨)
-func (l *Logger) LogCallback(format string, args ...interface{}) {
-	l.log(INFO, format, args...)
-}
 
 // LogShutdown 종료 관련 로그 (WARNING 레벨)
 func (l *Logger) LogShutdown(format string, args ...interface{}) {
