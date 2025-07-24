@@ -62,6 +62,19 @@ type HFTPumpDetector struct {
 	detectors [MAX_SYMBOLS]*SymbolDetector
 	symbolMap map[string]int // symbol -> detector index
 
+	// 설정값 (config에서 읽어온 값들)
+	configThreshold float64 // config의 임계값 (%)
+	configWindow    int64   // config의 윈도우 (나노초)
+
+	// 의존성 주입 (데이터 저장을 위해)
+	memManager interface {
+		GetTimeRangeOrderbooks(symbol string, start, end time.Time) []*memory.OrderbookSnapshot
+		GetTimeRangeTrades(symbol string, start, end time.Time) []*memory.TradeData
+	}
+	dataHandler interface {
+		SaveSignalData(symbol, exchange string, signalTime time.Time) error
+	}
+
 	// 워커 풀
 	workers     [WORKER_COUNT]*DetectorWorker
 	workQueue   chan *Trade
@@ -106,12 +119,26 @@ type PumpAlert struct {
 }
 
 // NewHFTPumpDetector HFT 펌핑 감지기 생성
-func NewHFTPumpDetector(threshold float64, windowSeconds int) *HFTPumpDetector {
+func NewHFTPumpDetector(
+	threshold float64,
+	windowSeconds int,
+	memManager interface {
+		GetTimeRangeOrderbooks(symbol string, start, end time.Time) []*memory.OrderbookSnapshot
+		GetTimeRangeTrades(symbol string, start, end time.Time) []*memory.TradeData
+	},
+	dataHandler interface {
+		SaveSignalData(symbol, exchange string, signalTime time.Time) error
+	},
+) *HFTPumpDetector {
 	detector := &HFTPumpDetector{
-		symbolMap:   make(map[string]int),
-		workQueue:   make(chan *Trade, BATCH_SIZE*WORKER_COUNT),
-		resultQueue: make(chan *PumpAlert, 1000),
-		stopChan:    make(chan struct{}),
+		symbolMap:       make(map[string]int),
+		workQueue:       make(chan *Trade, BATCH_SIZE*WORKER_COUNT),
+		resultQueue:     make(chan *PumpAlert, 1000),
+		stopChan:        make(chan struct{}),
+		configThreshold: threshold,                                 // config 임계값 저장
+		configWindow:    int64(windowSeconds) * int64(time.Second), // config 윈도우 저장
+		memManager:      memManager,                                // 메모리 매니저 주입
+		dataHandler:     dataHandler,                               // 데이터 핸들러 주입
 	}
 
 	// 객체 풀 초기화
@@ -143,7 +170,10 @@ func (hft *HFTPumpDetector) Start() error {
 
 	// 🔧 ULTRA-FAST: 배치 처리 제거 - 워커 시작하지 않음
 	// 🔧 ULTRA-FAST: 디스패치 루프 시작하지 않음
-	// 🔧 ULTRA-FAST: 결과 처리 루프 시작하지 않음
+
+	// 🔥 중요: 결과 처리 루프 시작 (파일 저장을 위해 필요!)
+	go hft.resultLoop()
+	log.Printf("🔥 [HFT] resultLoop 고루틴 시작됨")
 
 	// 통계 리포터만 시작
 	go hft.statsReporter()
@@ -160,13 +190,20 @@ func (hft *HFTPumpDetector) OnTradeReceived(symbol string, trade *Trade) {
 		return
 	}
 
+	// 🔥 통계 업데이트
+	atomic.AddUint64(&hft.totalTrades, 1)
+
 	// 🔥 즉시 감지 (고성능)
 	alert := hft.detectPumpDirect(symbol, trade)
 	if alert != nil {
+		// 🔥 즉시 처리 (파일 저장 포함)
+		hft.handlePumpAlertDirect(alert)
+
+		// 백업용 큐에도 추가 (논블로킹)
 		select {
 		case hft.resultQueue <- alert:
 		default:
-			// 큐 가득참: 드롭
+			// 큐 가득참: 드롭 (이미 직접 처리했으므로 문제없음)
 		}
 	}
 }
@@ -175,6 +212,12 @@ func (hft *HFTPumpDetector) OnTradeReceived(symbol string, trade *Trade) {
 func (hft *HFTPumpDetector) OnTradeReceivedFromMemory(memTrade *memory.TradeData) {
 	if memTrade == nil {
 		return
+	}
+
+	// 🔍 BTTCUSDT 디버그 로그 (임시)
+	if strings.Contains(memTrade.Symbol, "BTTC") {
+		log.Printf("🔍 [HFT DEBUG] BTTCUSDT 체결 수신: 가격=%s, 수량=%s, 사이드=%s",
+			memTrade.Price, memTrade.Quantity, memTrade.Side)
 	}
 
 	// memory.TradeData를 HFT Trade로 변환
@@ -504,11 +547,14 @@ func (hft *HFTPumpDetector) registerSymbol(symbol string) int {
 	// 빈 슬롯 찾기
 	for i := 0; i < len(hft.detectors); i++ {
 		if hft.detectors[i] == nil {
+			// config 값을 정수로 변환 (% → 정수)
+			configThresholdInt := uint64(hft.configThreshold * 10000) // 1% = 10000
+
 			// 새 감지기 생성
 			detector := &SymbolDetector{
 				ringBuf:   &RingBuffer{},
-				threshold: DEFAULT_THRESHOLD,
-				window:    2 * int64(time.Second), // 2초 윈도우
+				threshold: configThresholdInt, // config 임계값 사용
+				window:    hft.configWindow,   // config 윈도우 사용
 			}
 			copy(detector.symbol[:], symbol)
 
@@ -516,7 +562,8 @@ func (hft *HFTPumpDetector) registerSymbol(symbol string) int {
 			hft.detectors[i] = detector
 			hft.symbolMap[symbol] = i
 
-			log.Printf("🔥 [HFT] 새 심볼 등록: %s (인덱스: %d, 임계값: %d)", symbol, i, DEFAULT_THRESHOLD)
+			log.Printf("🔥 [HFT] 새 심볼 등록: %s (인덱스: %d, 임계값: %.1f%%, 윈도우: %.1fs)",
+				symbol, i, hft.configThreshold, float64(hft.configWindow)/float64(time.Second))
 			return i
 		}
 	}
@@ -626,6 +673,11 @@ func (hft *HFTPumpDetector) addToRingBufferDirect(rb *RingBuffer, trade *Trade) 
 
 // detectPumpDirect 즉시 펌핑 감지 (최적화된 알고리즘)
 func (hft *HFTPumpDetector) detectPumpDirect(symbol string, trade *Trade) *PumpAlert {
+	// 🔍 BTTCUSDT 디버그 로그 (함수 진입 확인)
+	if strings.Contains(symbol, "BTTC") {
+		log.Printf("🔍 [HFT DIRECT] BTTCUSDT detectPumpDirect 호출: 가격=%d", trade.Price)
+	}
+
 	// 🔥 초고속: 직접 감지 (워커 우회)
 	detectorIndex := hft.getDetectorIndex(symbol)
 	if detectorIndex == -1 {
@@ -633,12 +685,25 @@ func (hft *HFTPumpDetector) detectPumpDirect(symbol string, trade *Trade) *PumpA
 	}
 
 	if detectorIndex < 0 || detectorIndex >= len(hft.detectors) {
+		// 🔍 BTTCUSDT 오류 디버그
+		if strings.Contains(symbol, "BTTC") {
+			log.Printf("🚨 [HFT DIRECT] BTTCUSDT detectorIndex 오류: %d", detectorIndex)
+		}
 		return nil
 	}
 
 	detector := hft.detectors[detectorIndex]
 	if detector == nil {
+		// 🔍 BTTCUSDT 오류 디버그
+		if strings.Contains(symbol, "BTTC") {
+			log.Printf("🚨 [HFT DIRECT] BTTCUSDT detector가 nil: 인덱스=%d", detectorIndex)
+		}
 		return nil
+	}
+
+	// 🔍 BTTCUSDT 진행 상황 디버그
+	if strings.Contains(symbol, "BTTC") {
+		log.Printf("🔍 [HFT DIRECT] BTTCUSDT 링버퍼 추가 전: detectorIndex=%d", detectorIndex)
 	}
 
 	// 🔥 링 버퍼에 즉시 추가
@@ -647,6 +712,12 @@ func (hft *HFTPumpDetector) detectPumpDirect(symbol string, trade *Trade) *PumpA
 	// 🔥 즉시 감지 (메모리 스캔)
 	now := trade.Timestamp
 	windowStart := now - detector.window
+
+	// 🔍 BTTCUSDT 스캔 시작 디버그
+	if strings.Contains(symbol, "BTTC") {
+		log.Printf("🔍 [HFT DIRECT] BTTCUSDT 스캔 시작: now=%d, windowStart=%d, window=%d",
+			now, windowStart, detector.window)
+	}
 
 	return hft.scanRingBufferForPump(symbol, detector, now, windowStart)
 }
@@ -713,6 +784,12 @@ func (hft *HFTPumpDetector) scanRingBufferForPump(symbol string, sd *SymbolDetec
 
 	priceChange := ((lastPrice - firstPrice) * 1000000) / firstPrice // 10^6 = 100%
 
+	// 🔍 BTTCUSDT 계산 디버그 (임시)
+	if strings.Contains(symbolStr, "BTTC") {
+		log.Printf("🔍 [HFT CALC] BTTCUSDT: firstPrice=%d, lastPrice=%d, priceChange=%d, threshold=%d",
+			firstPrice, lastPrice, priceChange, sd.threshold)
+	}
+
 	if priceChange >= sd.threshold {
 		return &PumpAlert{
 			Symbol:       sd.symbol,
@@ -727,7 +804,7 @@ func (hft *HFTPumpDetector) scanRingBufferForPump(symbol string, sd *SymbolDetec
 	return nil
 }
 
-// handlePumpAlertDirect 즉시 펌핑 알림 처리 (🔥 파일 저장 추가)
+// handlePumpAlertDirect 즉시 펌핑 알림 처리 (🔥 파일 저장 + 데이터 저장 추가)
 func (hft *HFTPumpDetector) handlePumpAlertDirect(alert *PumpAlert) {
 	symbol := string(alert.Symbol[:])
 	// null terminator까지만 읽기
@@ -742,12 +819,28 @@ func (hft *HFTPumpDetector) handlePumpAlertDirect(alert *PumpAlert) {
 	log.Printf("⚡ [HFT PUMP] %s: +%.2f%% (지연: %dμs, 체결: %d건)",
 		symbol, changePercent, alert.LatencyNs/1000, alert.TradeCount)
 
-	// 🔥 파일 저장 로직 추가
+	// 🔥 JSON 파일 저장 (기존)
 	hft.savePumpAlertToFile(alert, symbol, changePercent)
+
+	// 🔥 데이터 저장 추가 (±5초 범위의 orderbook + trade 데이터)
+	if hft.dataHandler != nil {
+		signalTime := time.Unix(0, alert.DetectedAtNs)
+		if err := hft.dataHandler.SaveSignalData(symbol, "binance", signalTime); err != nil {
+			log.Printf("❌ [HFT] 데이터 저장 실패: %s - %v", symbol, err)
+		} else {
+			log.Printf("✅ [HFT DATA] %s: ±5초 데이터 저장 완료", symbol)
+		}
+	}
 }
 
 // savePumpAlertToFile 펌핑 알림을 JSON 파일로 저장 (🔥 신규 추가)
 func (hft *HFTPumpDetector) savePumpAlertToFile(alert *PumpAlert, symbol string, changePercent float64) {
+	// 🔧 signals 디렉토리 확인 및 생성
+	if err := os.MkdirAll("signals", 0755); err != nil {
+		log.Printf("❌ [HFT] signals 디렉토리 생성 실패: %v", err)
+		return
+	}
+
 	// JSON 데이터 구조 생성
 	pumpData := map[string]interface{}{
 		"metadata": map[string]interface{}{
@@ -766,7 +859,7 @@ func (hft *HFTPumpDetector) savePumpAlertToFile(alert *PumpAlert, symbol string,
 			"window_seconds":       float64(alert.WindowNs) / 1e9,
 			"detected_at":          time.Unix(0, alert.DetectedAtNs).UTC().Format(time.RFC3339Nano),
 			"latency_microseconds": alert.LatencyNs / 1000,
-			"threshold":            0.5, // 현재 임계값
+			"threshold":            hft.configThreshold, // 🔧 실제 config 임계값 사용
 		},
 		"technical_data": map[string]interface{}{
 			"raw_price_change": alert.PriceChange,

@@ -127,7 +127,11 @@ func (app *Application) Initialize() error {
 	// 🔥 HFT 펌핑 감지기 생성 (WebSocket 생성 전에 먼저!)
 	threshold := app.config.Signals.PumpDetection.PriceChangeThreshold
 	windowSeconds := app.config.Signals.PumpDetection.TimeWindowSeconds
-	app.hftDetector = hft.NewHFTPumpDetector(threshold, windowSeconds)
+
+	// dataHandler 생성 (signals manager와 동일한 방식)
+	dataHandler := storage.NewSignalDataHandler(app.storageManager, app.memManager)
+
+	app.hftDetector = hft.NewHFTPumpDetector(threshold, windowSeconds, app.memManager, dataHandler)
 	app.logger.LogSuccess("HFT 펌핑 감지기 생성 완료 (임계값: %.1f%%, 윈도우: %d초)", threshold, windowSeconds)
 
 	// 시그널 관리자 생성 (메모리 기반)
@@ -414,8 +418,6 @@ func (app *Application) printSystemStats() {
 	// 상태 요약 출력 (콘솔에만)
 	app.logger.PrintStatusSummary(stats)
 }
-
-
 
 func main() {
 	// 🛡️ 패닉 복구 메커니즘 설정
