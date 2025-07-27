@@ -211,8 +211,6 @@ func (l *Logger) LogPerformance(format string, args ...interface{}) {
 	l.log(INFO, format, args...)
 }
 
-
-
 // LogShutdown 종료 관련 로그 (WARNING 레벨)
 func (l *Logger) LogShutdown(format string, args ...interface{}) {
 	l.log(WARNING, format, args...)
@@ -363,9 +361,22 @@ func (l *Logger) logCriticalIfNeeded(level LogLevel, message, logEntry string) {
 
 	// 2. 특정 키워드 포함 검사
 	criticalKeywords := []string{
+		// 기존 키워드들
 		"밀림 감지", "latency", "지연", "재시작", "restart", "panic", "crash",
 		"버그", "bug", "오류", "error", "실패", "failed", "종료", "shutdown",
 		"연결 끊김", "connection", "timeout", "메모리 부족", "memory",
+
+		// 🚀 WebSocket 및 좀비 연결 관련 키워드 추가
+		"critical", "좀비", "zombie", "건강성", "health", "preemptive",
+		"websocket", "웹소켓", "reconnect", "disconnect", "끊어짐", "중단",
+		"alert", "경고", "감지", "detect", "goroutine", "고루틴", "leak", "누수",
+		"overflow", "오버플로우", "buffer", "버퍼", "channel", "채널",
+		"pump", "펌핑", "signal", "시그널", "hft", "감지기",
+
+		// 🔥 성능 및 시스템 관련 키워드
+		"performance", "성능", "slow", "느림", "hang", "멈춤", "freeze", "정지",
+		"deadlock", "데드락", "race", "경합", "corruption", "손상",
+		"disk", "디스크", "space", "공간", "full", "가득",
 	}
 
 	messageLower := strings.ToLower(message)

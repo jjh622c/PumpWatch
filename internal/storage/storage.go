@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
@@ -21,6 +22,10 @@ type StorageManager struct {
 	retentionDays int
 	mu            sync.RWMutex
 	hashCache     map[string]bool // 중복 저장 방지용 해시 캐시
+
+	// 🔥 고루틴 관리용 context 추가
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // StorageConfig 스토리지 설정
@@ -32,19 +37,32 @@ type StorageConfig struct {
 
 // NewStorageManager 스토리지 관리자 생성
 func NewStorageManager(config *StorageConfig) *StorageManager {
+	ctx, cancel := context.WithCancel(context.Background()) // 🔥 컨텍스트 생성
+
 	sm := &StorageManager{
 		baseDir:       config.BaseDir,
 		retentionDays: config.RetentionDays,
 		hashCache:     make(map[string]bool),
+		ctx:           ctx,    // 🔥 컨텍스트 설정
+		cancel:        cancel, // 🔥 취소 함수 설정
 	}
 
 	// 디렉토리 생성
 	sm.createDirectories()
 
 	// 정리 고루틴 시작
-	go sm.cleanupRoutine()
+	go sm.cleanupRoutine(sm.ctx) // 🔥 context 전달
 
 	return sm
+}
+
+// Stop 스토리지 관리자 중지
+func (sm *StorageManager) Stop() {
+	log.Printf("🛑 스토리지 관리자 중지 시작")
+	if sm.cancel != nil {
+		sm.cancel()
+	}
+	log.Printf("✅ 스토리지 관리자 중지 완료")
 }
 
 // createDirectories 필요한 디렉토리 생성
@@ -271,13 +289,19 @@ func (sm *StorageManager) SaveSignal(signal *memory.AdvancedPumpSignal) error {
 }
 
 // cleanupRoutine 정리 고루틴 (오래된 데이터 제거)
-func (sm *StorageManager) cleanupRoutine() {
+func (sm *StorageManager) cleanupRoutine(ctx context.Context) {
 	ticker := time.NewTicker(24 * time.Hour) // 24시간마다 실행
 	defer ticker.Stop()
 
-	for range ticker.C {
-		sm.cleanup()
-		sm.cleanupHashCache() // 해시 캐시 정리
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("🔴 스토리지 정리 고루틴 컨텍스트 종료")
+			return
+		case <-ticker.C:
+			sm.cleanup()
+			sm.cleanupHashCache() // 해시 캐시 정리
+		}
 	}
 }
 

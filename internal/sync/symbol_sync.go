@@ -128,7 +128,10 @@ func (ssm *SymbolSyncManager) Start() error {
 
 	// 주기적 동기화 시작
 	ssm.wg.Add(1)
-	go ssm.syncLoop()
+	go func() {
+		defer ssm.wg.Done()
+		ssm.syncLoop(ssm.ctx) // 🔥 context 전달
+	}()
 
 	return nil
 }
@@ -143,17 +146,34 @@ func (ssm *SymbolSyncManager) Stop() error {
 	ssm.isRunning = false
 	ssm.mu.Unlock()
 
-	ssm.logger.LogInfo("심볼 동기화 중지 요청")
-	ssm.cancel()
-	ssm.wg.Wait()
-	ssm.logger.LogInfo("심볼 동기화 중지 완료")
+	ssm.logger.LogConnection("심볼 동기화 중지 시작...")
 
+	// 🔥 컨텍스트 취소로 고루틴 종료
+	if ssm.cancel != nil {
+		ssm.cancel()
+	}
+
+	// 모든 고루틴 종료 대기
+	done := make(chan struct{})
+	go func() {
+		ssm.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		ssm.logger.LogConnection("✅ 심볼 동기화: 모든 고루틴 정리 완료")
+	case <-time.After(3 * time.Second):
+		ssm.logger.LogConnection("⚠️ 심볼 동기화: 고루틴 정리 타임아웃 (3초)")
+	}
+
+	ssm.logger.LogConnection("심볼 동기화 중지 완료")
 	return nil
 }
 
 // syncLoop 주기적 동기화 루프
-func (ssm *SymbolSyncManager) syncLoop() {
-	defer ssm.wg.Done()
+func (ssm *SymbolSyncManager) syncLoop(ctx context.Context) {
+	// 🔥 중복 제거: defer ssm.wg.Done() 삭제 (Start()에서 이미 처리)
 
 	binanceTicker := time.NewTicker(ssm.syncInterval)
 	defer binanceTicker.Stop()
@@ -167,7 +187,7 @@ func (ssm *SymbolSyncManager) syncLoop() {
 
 	for {
 		select {
-		case <-ssm.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-binanceTicker.C:
 			if err := ssm.syncSymbols(); err != nil {
@@ -409,7 +429,7 @@ func (ssm *SymbolSyncManager) reconnectWebSocket() error {
 	ssm.mu.RUnlock()
 
 	// WebSocket 재연결 (새 심볼 목록으로)
-	if err := ssm.websocket.Connect(ssm.ctx); err != nil {
+	if err := ssm.websocket.Connect(); err != nil {
 		return fmt.Errorf("WebSocket 재연결 실패: %v", err)
 	}
 

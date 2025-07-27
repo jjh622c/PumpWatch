@@ -1,6 +1,7 @@
 package callback
 
 import (
+	"context"
 	"log"
 	"sync"
 	"time"
@@ -12,13 +13,27 @@ import (
 type CallbackManager struct {
 	listingCallbacks []signals.ListingCallback
 	mu               sync.RWMutex
+	ctx              context.Context    // 🔥 context 추가
+	cancel           context.CancelFunc // 🔥 취소 함수 추가
 }
 
 // NewCallbackManager 콜백 관리자 생성
 func NewCallbackManager() *CallbackManager {
+	ctx, cancel := context.WithCancel(context.Background()) // 🔥 컨텍스트 생성
+
 	return &CallbackManager{
 		listingCallbacks: make([]signals.ListingCallback, 0),
+		ctx:              ctx,
+		cancel:           cancel,
 	}
+}
+
+// Stop 콜백 관리자 중지
+func (cm *CallbackManager) Stop() {
+	if cm.cancel != nil {
+		cm.cancel()
+	}
+	log.Printf("✅ 콜백 관리자 중지 완료")
 }
 
 // RegisterListingCallback 상장공시 콜백 등록
@@ -52,6 +67,14 @@ func (cm *CallbackManager) TriggerListingAnnouncement(symbol, exchange, source s
 					log.Printf("❌ 콜백 실행 중 오류: %v", r)
 				}
 			}()
+
+			// 🔥 컨텍스트 체크 추가
+			select {
+			case <-cm.ctx.Done():
+				return // 시스템 종료 중이면 콜백 실행 중단
+			default:
+			}
+
 			cb.OnListingAnnouncement(signal)
 		}(callback)
 	}

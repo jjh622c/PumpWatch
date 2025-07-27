@@ -1,6 +1,7 @@
 package hft
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -93,7 +94,10 @@ type HFTPumpDetector struct {
 	running    int32 // atomic
 	mu         sync.RWMutex
 	stopChan   chan struct{}
-	workerPool sync.Pool // 객체 재사용 풀
+	workerPool sync.Pool          // 객체 재사용 풀
+	wg         sync.WaitGroup     // 🔥 고루틴 누수 방지 추가
+	ctx        context.Context    // 🔥 메인 컨텍스트 추가
+	cancel     context.CancelFunc // 🔥 취소 함수 추가
 }
 
 // DetectorWorker 전용 감지 워커
@@ -135,6 +139,8 @@ func NewHFTPumpDetector(
 		SaveSignalData(symbol, exchange string, signalTime time.Time) error
 	},
 ) *HFTPumpDetector {
+	ctx, cancel := context.WithCancel(context.Background()) // 🔥 컨텍스트 생성
+
 	detector := &HFTPumpDetector{
 		symbolMap:       make(map[string]int),
 		workQueue:       make(chan *Trade, BATCH_SIZE*WORKER_COUNT),
@@ -144,6 +150,8 @@ func NewHFTPumpDetector(
 		configWindow:    int64(windowSeconds) * int64(time.Second), // config 윈도우 저장
 		memManager:      memManager,                                // 메모리 매니저 주입
 		dataHandler:     dataHandler,                               // 데이터 핸들러 주입
+		ctx:             ctx,                                       // 🔥 컨텍스트 설정
+		cancel:          cancel,                                    // 🔥 취소 함수 설정
 	}
 
 	// 객체 풀 초기화
@@ -177,11 +185,19 @@ func (hft *HFTPumpDetector) Start() error {
 	// 🔧 ULTRA-FAST: 디스패치 루프 시작하지 않음
 
 	// 🔥 중요: 결과 처리 루프 시작 (파일 저장을 위해 필요!)
-	go hft.resultLoop()
+	hft.wg.Add(1)
+	go func() {
+		defer hft.wg.Done()
+		hft.resultLoop(hft.ctx) // 🔥 context 전달
+	}()
 	log.Printf("🔥 [HFT] resultLoop 고루틴 시작됨")
 
 	// 통계 리포터만 시작
-	go hft.statsReporter()
+	hft.wg.Add(1)
+	go func() {
+		defer hft.wg.Done()
+		hft.statsReporter(hft.ctx) // 🔥 context 전달
+	}()
 	log.Printf("🔥 [HFT] statsReporter 고루틴 시작됨")
 
 	log.Printf("✅ [HFT] 즉시 처리 모드 활성화 완료")
@@ -574,9 +590,12 @@ func (hft *HFTPumpDetector) registerSymbol(symbol string) int {
 }
 
 // resultLoop 결과 처리 루프
-func (hft *HFTPumpDetector) resultLoop() {
+func (hft *HFTPumpDetector) resultLoop(ctx context.Context) {
 	for {
 		select {
+		case <-ctx.Done():
+			log.Printf("🔥 [HFT] resultLoop 컨텍스트 종료")
+			return
 		case <-hft.stopChan:
 			return
 		case alert := <-hft.resultQueue:
@@ -600,13 +619,19 @@ func (hft *HFTPumpDetector) handlePumpAlert(alert *PumpAlert) {
 		symbol, changePercent, alert.LatencyNs/1000, alert.TradeCount)
 }
 
-// statsReporter 통계 리포터 (5초마다)
-func (hft *HFTPumpDetector) statsReporter() {
-	ticker := time.NewTicker(5 * time.Second)
+// statsReporter 통계 리포터 (5분마다)
+func (hft *HFTPumpDetector) statsReporter(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute) // 5초에서 5분으로 변경
 	defer ticker.Stop()
+
+	cleanupTicker := time.NewTicker(30 * time.Minute) // 30분마다 심볼 정리
+	defer cleanupTicker.Stop()
 
 	for {
 		select {
+		case <-ctx.Done():
+			log.Printf("🔥 [HFT] statsReporter 컨텍스트 종료")
+			return
 		case <-hft.stopChan:
 			return
 		case <-ticker.C:
@@ -623,6 +648,9 @@ func (hft *HFTPumpDetector) statsReporter() {
 
 			log.Printf("📊 [HFT STATS] 체결: %d건, 펌핑: %d건, 평균지연: %dμs, 심볼: %d/%d개(%.1f%%)",
 				trades, pumps, avgLatency/1000, symbolCount, MAX_SYMBOLS, slotUsage)
+		case <-cleanupTicker.C:
+			// 🔥 주기적 심볼 정리 (메모리 누수 방지)
+			hft.CleanupOldSymbols()
 		}
 	}
 }
@@ -633,14 +661,71 @@ func (hft *HFTPumpDetector) Stop() {
 		return
 	}
 
+	// 🔥 컨텍스트 취소 (모든 고루틴에 종료 신호)
+	if hft.cancel != nil {
+		hft.cancel()
+	}
+
 	close(hft.stopChan)
 
 	// 워커 중지
 	for _, worker := range hft.workers {
-		close(worker.stopChan)
+		if worker != nil && worker.stopChan != nil {
+			close(worker.stopChan)
+		}
+	}
+
+	// 🔥 모든 고루틴 종료 대기 (타임아웃 설정)
+	done := make(chan struct{})
+	go func() {
+		hft.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		log.Printf("🔥 [HFT] 모든 고루틴 정리 완료")
+	case <-time.After(5 * time.Second):
+		log.Printf("⚠️ [HFT] 고루틴 정리 타임아웃 (5초)")
 	}
 
 	log.Printf("🔥 [HFT] 펌핑 감지 중지 완료")
+}
+
+// CleanupOldSymbols 사용하지 않는 심볼들 정리 (메모리 누수 방지)
+func (hft *HFTPumpDetector) CleanupOldSymbols() {
+	hft.mu.Lock()
+	defer hft.mu.Unlock()
+
+	cleaned := 0
+	cutoffTime := time.Now().Add(-1 * time.Hour) // 1시간 전 cutoff
+
+	for symbol, index := range hft.symbolMap {
+		if index >= 0 && index < len(hft.detectors) && hft.detectors[index] != nil {
+			detector := hft.detectors[index]
+
+			// 링 버퍼에서 최근 활동 확인
+			head := atomic.LoadUint64(&detector.ringBuf.head)
+			tail := atomic.LoadUint64(&detector.ringBuf.tail)
+
+			if head > tail {
+				// 가장 최근 거래 시간 확인
+				latestIdx := (head - 1) & RING_BUFFER_MASK
+				latestTrade := &detector.ringBuf.buffer[latestIdx]
+
+				if latestTrade.Timestamp > 0 && time.Unix(0, latestTrade.Timestamp).Before(cutoffTime) {
+					// 1시간 이상 비활성 심볼 제거
+					hft.detectors[index] = nil
+					delete(hft.symbolMap, symbol)
+					cleaned++
+				}
+			}
+		}
+	}
+
+	if cleaned > 0 {
+		log.Printf("🧹 [HFT] 비활성 심볼 %d개 정리 완료", cleaned)
+	}
 }
 
 // min 함수 (인라인)
@@ -929,6 +1014,13 @@ func (hft *HFTPumpDetector) savePumpAlertToFile(alert *PumpAlert, symbol string,
 
 	// 파일 저장 (비동기 - 레이턴시 최소화)
 	go func() {
+		// 🔥 컨텍스트 체크 추가
+		select {
+		case <-hft.ctx.Done():
+			return // 시스템 종료 중이면 파일 저장 중단
+		default:
+		}
+
 		if err := os.WriteFile(filename, jsonData, 0644); err != nil {
 			log.Printf("❌ [HFT] 파일 저장 실패: %v", err)
 		} else {

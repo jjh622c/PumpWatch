@@ -196,6 +196,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	
 	// 3초 후 프로그램 종료
 	go func() {
+		// 🔥 짧은 작업이므로 간단한 타임아웃만 적용
 		time.Sleep(3 * time.Second)
 		log.Fatal("프로그램 정지 요청으로 인한 종료")
 	}()

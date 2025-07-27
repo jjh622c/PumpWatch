@@ -75,7 +75,7 @@
       "_enabled_help": "펌핑 감지 기능 활성화 여부",
       "_enabled_tip": "false로 설정하면 펌핑 감지를 비활성화합니다",
       
-      "price_change_threshold": 1.0,
+      "price_change_threshold": 3.0,
       "_price_change_threshold_help": "펌핑으로 판단할 최소 가격 상승률 (%)",
       "_price_change_threshold_range": "권장 범위: 0.5-5.0% (낮을수록 민감, 높을수록 확실한 신호만)",
       "_price_change_threshold_tip": "🔧 라이브 운영: 0.5% → 1.0%로 상향 조정하여 노이즈 감소",
@@ -85,7 +85,7 @@
         "_safe": "3.0-5.0% (안전한 거래, 강한 신호만)"
       },
       
-      "time_window_seconds": 2,
+      "time_window_seconds": 1,
       "_time_window_seconds_help": "가격 변동을 측정할 시간 윈도우 (초)",
       "_time_window_seconds_range": "권장 범위: 1-10초",
       "_time_window_seconds_tip": "🔧 성능 최적화: 1초 → 2초로 조정하여 안정성 향상",

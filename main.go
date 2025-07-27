@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -59,14 +60,13 @@ func NewApplication(cfg *config.Config) *Application {
 func (app *Application) Initialize() error {
 	app.logger.LogInfo("애플리케이션 초기화 시작")
 
-	// 메모리 관리자 생성
+	// 🧠 메모리 관리자 초기화 (config 값 사용)
 	app.memManager = memory.NewManager(
 		app.config.Memory.MaxOrderbooksPerSymbol,
 		app.config.Memory.MaxTradesPerSymbol,
-		1000,                                        // 최대 시그널 수
-		app.config.Memory.TradeRetentionMinutes,     // 체결 데이터 보존 시간
-		app.config.Memory.OrderbookRetentionMinutes, // 오더북 데이터 보존 시간 (0.1분 = 6초)
-		// 🔧 하드코딩 제거: config에서 새로 추가된 값들 전달
+		1000, // 최대 시그널 수 (하드코딩)
+		app.config.Memory.TradeRetentionMinutes,
+		app.config.Memory.OrderbookRetentionMinutes,
 		app.config.Memory.CompressionIntervalSeconds,
 		app.config.Memory.HeapWarningMB,
 		app.config.Memory.GCThresholdOrderbooks,
@@ -74,7 +74,8 @@ func (app *Application) Initialize() error {
 		app.config.Memory.MaxGoroutines,
 		app.config.Memory.MonitoringIntervalSeconds,
 	)
-	app.logger.LogSuccess("메모리 관리자 생성 완료")
+	app.memManager.Start() // 🔥 메모리 관리자 시작
+	app.logger.LogSuccess("메모리 관리자 초기화 완료")
 
 	// 🚨 핵심: 캐시 매니저 생성 (raw 데이터 관리자 대체)
 	var err error
@@ -265,7 +266,7 @@ func (app *Application) Start() error {
 	}
 
 	app.logger.LogConnection("WebSocket 연결 시도 중...")
-	if err := app.websocket.Connect(app.ctx); err != nil {
+	if err := app.websocket.Connect(); err != nil {
 		app.logger.LogError("WebSocket 연결 실패: %v", err)
 		return err
 	}
@@ -283,7 +284,7 @@ func (app *Application) Start() error {
 	app.logger.LogSuccess("시그널 감지 시작")
 
 	// 시스템 모니터링 시작
-	go app.monitorSystem()
+	go app.monitorSystem(app.ctx) // 🔥 context 전달
 
 	app.logger.LogSuccess("애플리케이션 시작 완료")
 	return nil
@@ -326,6 +327,24 @@ func (app *Application) Stop() error {
 		app.logger.LogFile("캐시 매니저 닫기")
 	}
 
+	// 🔥 메모리 관리자 중지
+	if app.memManager != nil {
+		app.memManager.Stop()
+		app.logger.LogConnection("메모리 관리자 중지")
+	}
+
+	// 🔥 스토리지 관리자 중지
+	if app.storageManager != nil {
+		app.storageManager.Stop()
+		app.logger.LogConnection("스토리지 관리자 중지")
+	}
+
+	// 🔥 콜백 관리자 중지
+	if app.callbackManager != nil {
+		app.callbackManager.Stop()
+		app.logger.LogConnection("콜백 관리자 중지")
+	}
+
 	// 로거 닫기
 	if app.logger != nil {
 		app.logger.Close()
@@ -336,12 +355,15 @@ func (app *Application) Stop() error {
 }
 
 // monitorSystem 시스템 모니터링
-func (app *Application) monitorSystem() {
+func (app *Application) monitorSystem(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
+		case <-ctx.Done():
+			app.logger.LogShutdown("시스템 모니터링 컨텍스트 종료")
+			return
 		case <-app.ctx.Done():
 			return
 		case <-ticker.C:
@@ -432,6 +454,25 @@ func main() {
 		}
 	}()
 
+	// 🔧 표준 로그를 파일과 콘솔에 동시 출력 설정
+	logDir := "logs"
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		fmt.Printf("❌ 로그 디렉토리 생성 실패: %v\n", err)
+		os.Exit(1)
+	}
+
+	logFile, err := os.OpenFile("logs/noticepumpcatch.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		fmt.Printf("❌ 로그 파일 열기 실패: %v\n", err)
+		os.Exit(1)
+	}
+	defer logFile.Close()
+
+	// 🔥 표준 log 패키지를 파일과 콘솔에 동시 출력하도록 설정
+	multiWriter := io.MultiWriter(os.Stdout, logFile)
+	log.SetOutput(multiWriter)
+	log.SetFlags(log.LstdFlags) // 날짜/시간 포함
+
 	log.Printf("🚀 NoticePumpCatch 시스템 시작")
 
 	// 설정 로드
@@ -497,7 +538,7 @@ func main() {
 	app.logger.LogSuccess("✅ 시스템 준비 완료! Ctrl+C로 종료")
 
 	// 🔍 시스템 모니터링 시작 (장시간 실행용)
-	go app.startSystemMonitoring()
+	go app.startSystemMonitoring(app.ctx) // 🔥 context 전달
 
 	for {
 		select {
@@ -513,16 +554,19 @@ func main() {
 }
 
 // startSystemMonitoring 시스템 모니터링 시작 (장시간 실행용)
-func (app *Application) startSystemMonitoring() {
-	app.logger.LogInfo("🔍 시스템 모니터링 시작 (5분 간격)")
+func (app *Application) startSystemMonitoring(ctx context.Context) {
+	app.logger.LogInfo("🔍 시스템 모니터링 시작 (10분 간격)")
 
-	ticker := time.NewTicker(5 * time.Minute) // 5분마다 체크
+	ticker := time.NewTicker(10 * time.Minute) // 5분에서 10분으로 늘림
 	defer ticker.Stop()
 
 	lastDataTime := time.Now()
 
 	for {
 		select {
+		case <-ctx.Done():
+			app.logger.LogShutdown("장시간 시스템 모니터링 컨텍스트 종료")
+			return
 		case <-ticker.C:
 			app.performSystemHealthCheck(&lastDataTime)
 		}

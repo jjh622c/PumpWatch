@@ -74,7 +74,7 @@ func NewFileManager(baseDir string, maxFileSize int64, bufferSize int, useCompre
 	fm.wg.Add(1) // 🔧 고루틴 누수 방지
 	go func() {
 		defer fm.wg.Done()
-		fm.flushRoutine()
+		fm.flushRoutine(fm.ctx) // 🔥 context 전달
 	}()
 
 	return fm
@@ -312,13 +312,13 @@ func (fm *FileManager) rotateFile(handler *FileHandler) error {
 }
 
 // flushRoutine 정기 flush 고루틴
-func (fm *FileManager) flushRoutine() {
+func (fm *FileManager) flushRoutine(ctx context.Context) {
 	ticker := time.NewTicker(fm.flushInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-fm.ctx.Done(): // 🔧 고루틴 누수 방지: context 확인
+		case <-ctx.Done(): // 🔧 고루틴 누수 방지: context 확인
 			return
 		case <-ticker.C:
 			fm.flushAll()

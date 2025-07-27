@@ -15,6 +15,8 @@ import (
 	"noticepumpcatch/internal/latency"
 	"noticepumpcatch/internal/logger"
 	"noticepumpcatch/internal/memory"
+	"os"
+	"sync/atomic"
 )
 
 // BinanceWebSocket 바이낸스 WebSocket 클라이언트
@@ -45,6 +47,16 @@ type BinanceWebSocket struct {
 	// 🔧 하드코딩 제거: config 설정들 추가
 	maxSymbolsPerGroup    int
 	reportIntervalSeconds int
+
+	// 🔥 워커 상태 모니터링 추가
+	lastWorkerActivity time.Time
+	workerHealthCheck  time.Time
+
+	// 🚀 건강성 모니터링 (좀비 연결 방지)
+	lastMessageTime     time.Time    // 마지막 메시지 수신 시간
+	connectionStartTime time.Time    // 연결 시작 시간 (24시간 타이머용)
+	messageCounter      int64        // 메시지 수신 카운터
+	healthCheckTicker   *time.Ticker // 건강성 체크 타이머
 
 	// 배치 통계 (성능 최적화)
 	batchStats struct {
@@ -105,74 +117,128 @@ func NewBinanceWebSocket(
 	bws.batchStats.lastReport = time.Now()
 	bws.batchStats.reportInterval = time.Duration(reportIntervalSeconds) * time.Second // 🔧 config 값 사용
 
+	// 🚀 건강성 모니터링 초기화
+	now := time.Now()
+	bws.lastMessageTime = now
+	bws.connectionStartTime = now
+	bws.messageCounter = 0
+	bws.healthCheckTicker = time.NewTicker(30 * time.Second) // 30초마다 건강성 체크
+
 	// 🔧 고루틴 누수 방지: wg에 추가하고 정리 보장
-	bws.wg.Add(1)
+	bws.wg.Add(2) // symbolCountReportRoutine + healthCheckRoutine
 	go func() {
 		defer bws.wg.Done()
-		bws.symbolCountReportRoutine() // 심볼 개수 보고 고루틴 시작
+		bws.symbolCountReportRoutine(bws.ctx) // 🔥 context 전달
+	}()
+
+	go func() {
+		defer bws.wg.Done()
+		bws.healthCheckRoutine(bws.ctx) // 🚀 건강성 체크 루틴
 	}()
 
 	return bws
 }
 
 // Connect WebSocket 연결
-func (bws *BinanceWebSocket) Connect(ctx context.Context) error {
+func (bws *BinanceWebSocket) Connect() error {
+	// 🚀 연결 시작 시간 업데이트 (24시간 타이머용)
+	bws.connectionStartTime = time.Now()
+	bws.messageCounter = 0 // 메시지 카운터 리셋
+	log.Printf("🔗 WebSocket 연결 시작... (24시간 타이머 시작)")
+
+	// 🔧 기존 연결 정리
 	bws.mu.Lock()
 	if bws.isConnected {
 		bws.mu.Unlock()
 		return fmt.Errorf("이미 연결되어 있습니다")
 	}
+	bws.connections = make([]*websocket.Conn, 0) // 🔥 새로운 연결 배열 생성
 	bws.mu.Unlock()
+
+	log.Printf("🔄 [CONNECT] WebSocket 연결 시작...")
 
 	// 스트림 그룹 생성
 	streamGroups := bws.createStreamGroups()
+	log.Printf("🔄 [CONNECT] %d개 그룹 생성됨", len(streamGroups))
 
 	// 각 그룹별로 연결
 	for i, group := range streamGroups {
-		if err := bws.connectToGroup(ctx, group, i); err != nil {
+		log.Printf("🔄 [CONNECT] 그룹 %d 연결 시도 시작...", i)
+		if err := bws.connectToGroup(bws.ctx, group, i); err != nil {
+			log.Printf("❌ [CONNECT] 그룹 %d 연결 실패: %v", i, err)
 			return fmt.Errorf("그룹 %d 연결 실패: %v", i, err)
 		}
+		log.Printf("✅ [CONNECT] 그룹 %d 연결 성공", i)
 	}
 
-	// 워커 풀 시작
-	if bws.logger != nil {
-		bws.logger.LogConnection("워커 풀 시작 시도")
-	} else {
-		log.Printf("🔧 워커 풀 시작 시도")
-	}
+	// 🔥 워커 풀 시작 (컨텍스트 사용)
+	log.Printf("🔄 [CONNECT] 워커 풀 시작...")
 	bws.startWorkerPool()
 
-	if bws.logger != nil {
-		bws.logger.LogConnection("바이낸스 WebSocket 연결 완료")
-	} else {
-		log.Printf("✅ 바이낸스 WebSocket 연결 완료")
-	}
+	// 🔥 연결 상태 설정
+	bws.mu.Lock()
+	bws.isConnected = true
+	bws.mu.Unlock()
+
+	log.Printf("✅ [CONNECT] WebSocket 연결 완료")
 	return nil
 }
 
-// Disconnect 연결 해제
-func (bws *BinanceWebSocket) Disconnect() {
+// Disconnect WebSocket 연결 해제
+func (bws *BinanceWebSocket) Disconnect() error {
 	bws.mu.Lock()
-	if !bws.isConnected {
-		bws.mu.Unlock()
-		return
-	}
-	bws.isConnected = false
-	bws.mu.Unlock()
+	defer bws.mu.Unlock()
 
-	// 🔧 고루틴 누수 방지: 컨텍스트 취소로 모든 고루틴 정리
+	if !bws.isConnected {
+		return nil
+	}
+
+	log.Printf("🔄 WebSocket 연결 해제 시작...")
+
+	// 🚀 건강성 모니터링 정리
+	if bws.healthCheckTicker != nil {
+		bws.healthCheckTicker.Stop()
+		log.Printf("🩺 건강성 모니터링 타이머 정리 완료")
+	}
+
+	// Context 취소로 모든 고루틴에 종료 신호
 	if bws.cancel != nil {
 		bws.cancel()
 	}
 
 	// 모든 연결 닫기
-	for _, conn := range bws.connections {
+	for i, conn := range bws.connections {
 		if conn != nil {
+			log.Printf("🔴 [DISCONNECT] 연결 %d 닫는 중...", i)
 			conn.Close()
 		}
 	}
 
+	// 🔥 채널 완전 드레인 (타임아웃 증가)
+	log.Printf("🔴 [DISCONNECT] 채널 정리 시작...")
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("❌ [DISCONNECT] 채널 정리 중 panic: %v", r)
+			}
+		}()
+
+		drainCount := 0
+		for {
+			select {
+			case <-bws.dataChannel:
+				drainCount++
+			case <-bws.tradeChannel:
+				drainCount++
+			case <-time.After(500 * time.Millisecond): // 🔥 타임아웃 증가
+				log.Printf("🔴 [DISCONNECT] 채널 정리 완료 (%d개 드레인)", drainCount)
+				return
+			}
+		}
+	}()
+
 	// 🔧 고루틴 누수 방지: 모든 고루틴 종료 대기 (타임아웃 설정)
+	log.Printf("🔴 [DISCONNECT] 고루틴 종료 대기...")
 	done := make(chan struct{})
 	go func() {
 		bws.wg.Wait()
@@ -181,52 +247,19 @@ func (bws *BinanceWebSocket) Disconnect() {
 
 	select {
 	case <-done:
-		if bws.logger != nil {
-			bws.logger.LogConnection("모든 고루틴 정리 완료")
-		}
-	case <-time.After(5 * time.Second):
-		if bws.logger != nil {
-			bws.logger.LogError("고루틴 정리 타임아웃 (5초)")
-		}
+		log.Printf("✅ [DISCONNECT] 모든 고루틴 정리 완료")
+	case <-time.After(8 * time.Second): // 🔥 타임아웃 증가
+		log.Printf("⚠️ [DISCONNECT] 고루틴 정리 타임아웃 (8초)")
 	}
 
-	// 🔥 채널 정리 고루틴 누수 수정: wg에 추가
-	bws.wg.Add(1)
-	go func() {
-		defer bws.wg.Done()
-		for {
-			select {
-			case <-bws.dataChannel:
-			case <-bws.tradeChannel:
-			default:
-				return
-			}
-		}
-	}()
+	// 🔥 컨텍스트 재생성 (재연결을 위해)
+	bws.mu.Lock()
+	bws.ctx, bws.cancel = context.WithCancel(context.Background())
+	bws.mu.Unlock()
+	log.Printf("🔄 [DISCONNECT] 새 컨텍스트 생성 완료")
 
-	// 🔥 채널 정리 고루틴 완료 대기
-	finalDone := make(chan struct{})
-	go func() {
-		bws.wg.Wait()
-		close(finalDone)
-	}()
-
-	select {
-	case <-finalDone:
-		if bws.logger != nil {
-			bws.logger.LogConnection("채널 정리 완료")
-		}
-	case <-time.After(2 * time.Second):
-		if bws.logger != nil {
-			bws.logger.LogError("채널 정리 타임아웃 (2초)")
-		}
-	}
-
-	if bws.logger != nil {
-		bws.logger.LogConnection("바이낸스 WebSocket 연결 해제 완료")
-	} else {
-		log.Printf("🔴 바이낸스 WebSocket 연결 해제 완료")
-	}
+	log.Printf("✅ [DISCONNECT] WebSocket 연결 해제 완료")
+	return nil
 }
 
 // createStreamGroups 스트림을 그룹으로 나누기 (바이낸스 WebSocket 제한: 1024개 스트림/연결)
@@ -255,9 +288,16 @@ func (bws *BinanceWebSocket) createStreamGroups() [][]string {
 	return groups
 }
 
-// connectToGroup 그룹별 연결
-
+// connectToGroup 특정 그룹에 연결
 func (bws *BinanceWebSocket) connectToGroup(ctx context.Context, group []string, groupIndex int) error {
+	// 🔥 기존 연결이 있으면 정리
+	bws.mu.Lock()
+	if groupIndex < len(bws.connections) && bws.connections[groupIndex] != nil {
+		bws.connections[groupIndex].Close()
+		bws.connections[groupIndex] = nil
+	}
+	bws.mu.Unlock()
+
 	// 바이낸스 WebSocket API의 올바른 형식으로 수정
 	// 여러 스트림을 연결할 때는 /stream 엔드포인트를 사용
 	streams := make([]string, 0)
@@ -276,13 +316,7 @@ func (bws *BinanceWebSocket) connectToGroup(ctx context.Context, group []string,
 	streamParam := strings.Join(streams, "/")
 	url := fmt.Sprintf("wss://stream.binance.com:9443/stream?streams=%s", streamParam)
 
-	if bws.logger != nil {
-		bws.logger.LogConnection("그룹 %d 연결 시도: %d개 심볼", groupIndex, len(group))
-		bws.logger.LogConnection("WebSocket URL 연결 시도: %s", url)
-	} else {
-		log.Printf("🔗 그룹 %d 연결 시도: %d개 심볼", groupIndex, len(group))
-		log.Printf("🔗 WebSocket URL 연결 시도: %s", url)
-	}
+	log.Printf("🔗 [그룹 %d] 연결 시도: %d개 심볼", groupIndex, len(group))
 
 	// WebSocket 연결에 타임아웃 설정
 	dialer := websocket.Dialer{
@@ -290,28 +324,41 @@ func (bws *BinanceWebSocket) connectToGroup(ctx context.Context, group []string,
 	}
 	conn, _, err := dialer.Dial(url, nil)
 	if err != nil {
-		if bws.logger != nil {
-			bws.logger.LogError("WebSocket 연결 실패: %v", err)
-		} else {
-			log.Printf("❌ WebSocket 연결 실패: %v", err)
-		}
+		log.Printf("❌ [그룹 %d] WebSocket 연결 실패: %v", groupIndex, err)
 		return fmt.Errorf("WebSocket 연결 실패: %v", err)
 	}
 
-	if bws.logger != nil {
-		bws.logger.LogSuccess("WebSocket 연결 성공: %s", url)
-	} else {
-		log.Printf("✅ WebSocket 연결 성공: %s", url)
-	}
+	log.Printf("✅ [그룹 %d] WebSocket 연결 성공", groupIndex)
 
-	// 연결 설정 간소화
-	conn.SetReadLimit(1024 * 1024) // 1MB
+	// 연결 설정 개선
+	conn.SetReadLimit(2 * 1024 * 1024) // 2MB (기존 1MB에서 증가)
+
+	// 🏓 바이낸스 WebSocket 핑퐁 핸들러 (공식 스펙 준수)
+	// 서버에서 3분마다 ping을 보내면 동일한 payload로 pong 응답
+	conn.SetPingHandler(func(appData string) error {
+		log.Printf("🏓 [그룹 %d] 서버 Ping 수신 → Pong 응답", groupIndex)
+		// 바이낸스 요구사항: 동일한 payload로 pong 응답
+		return conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(10*time.Second))
+	})
+
+	// 🚪 연결 종료 핸들러
+	conn.SetCloseHandler(func(code int, text string) error {
+		log.Printf("🚪 [그룹 %d] WebSocket 연결 종료됨: 코드=%d, 메시지=%s", groupIndex, code, text)
+		return nil
+	})
 
 	// 다중 연결 목록에 추가
 	bws.mu.Lock()
-	bws.connections = append(bws.connections, conn)
-	bws.isConnected = true
+	// 🔥 연결 배열 크기 조정
+	if len(bws.connections) <= groupIndex {
+		newConnections := make([]*websocket.Conn, groupIndex+1)
+		copy(newConnections, bws.connections)
+		bws.connections = newConnections
+	}
+	bws.connections[groupIndex] = conn
 	bws.mu.Unlock()
+
+	log.Printf("✅ [그룹 %d] WebSocket 연결 완료 - 메시지 처리 고루틴 시작", groupIndex)
 
 	// 메시지 처리 고루틴 시작
 	bws.wg.Add(1) // 🔧 고루틴 누수 방지
@@ -327,41 +374,78 @@ func (bws *BinanceWebSocket) connectToGroup(ctx context.Context, group []string,
 func (bws *BinanceWebSocket) handleMessages(ctx context.Context, conn *websocket.Conn, groupIndex int) {
 	log.Printf("🚀 메시지 처리 고루틴 시작 (그룹 %d)", groupIndex)
 
+	// 🔥 디버깅: 메시지 수신 카운터 추가
+	messageCount := 0
+	lastMessageTime := time.Now()
+
+	// 🔥 ReadJSON 타임아웃 설정 (30초)
+	readTimeout := 30 * time.Second
+
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("🔴 WebSocket 연결 종료 (그룹 %d)", groupIndex)
+			log.Printf("🔴 WebSocket 연결 종료 (그룹 %d) - 총 %d개 메시지 처리", groupIndex, messageCount)
 			return
 		default:
+			// 🔥 ReadJSON 타임아웃 설정
+			conn.SetReadDeadline(time.Now().Add(readTimeout))
+
 			var msg map[string]interface{}
 			err := conn.ReadJSON(&msg)
 			if err != nil {
-				log.Printf("❌ 메시지 수신 오류 (그룹 %d): %v", groupIndex, err)
+				// 🔥 WebSocket 오류 발생시 안전한 전체 재시작
+				log.Printf("❌ [CRITICAL] WebSocket 연결 오류 (그룹 %d): %v", groupIndex, err)
+				log.Printf("🔄 [RESTART] 안전을 위해 프로그램을 재시작합니다...")
+				log.Printf("📊 [STATS] 총 %d개 메시지 처리 완료", messageCount)
+
+				// 🚨 즉시 graceful shutdown 시작
+				go func() {
+					// 잠시 대기하여 로그가 출력되도록 함
+					time.Sleep(1 * time.Second)
+					log.Printf("🛑 [SHUTDOWN] 프로그램 종료 시작...")
+					os.Exit(1) // exit code 1로 재시작 신호
+				}()
 				return
+			}
+
+			// 🔥 메시지 수신 성공
+			messageCount++
+			lastMessageTime = time.Now()
+
+			// 🚀 건강성 모니터링 업데이트
+			atomic.AddInt64(&bws.messageCounter, 1)
+			bws.lastMessageTime = lastMessageTime
+
+			// 🔥 ReadJSON 타임아웃 해제
+			conn.SetReadDeadline(time.Time{})
+
+			// 🔥 간소화: 5000개마다만 상태 로그 출력
+			if messageCount%5000 == 0 {
+				log.Printf("📨 [그룹 %d] %dk개 메시지 처리됨 (마지막: %v)",
+					groupIndex, messageCount/1000, lastMessageTime.Format("15:04:05"))
 			}
 
 			// 디버깅: 메시지 구조 확인
 			if stream, ok := msg["stream"].(string); ok {
-				if bws.logger != nil {
-					bws.logger.LogWebSocket("메시지 수신: %s", stream)
-				} else {
-					log.Printf("📨 메시지 수신: %s", stream)
+				// 🔥 메시지 수신 로그 간소화 (1000개마다만 출력)
+				if messageCount%1000 == 0 {
+					log.Printf("📨 [그룹 %d] %d천개 메시지 처리 중... (스트림: %s)",
+						groupIndex, messageCount/1000, stream)
 				}
 
 				if data, ok := msg["data"].(map[string]interface{}); ok {
 					// 스트림 타입에 따라 분류
-					if strings.Contains(stream, "@depth") {
-						// 오더북 데이터
+					if strings.Contains(stream, "@depth20") {
+						// 🔧 일반 오더북 데이터는 채널 경유
 						select {
 						case bws.dataChannel <- OrderbookData{Stream: stream, Data: data}:
-							// 성공적으로 전송됨
+							// 🔥 채널 전송 성공 로그 (디버깅용)
+							if messageCount%10000 == 0 {
+								log.Printf("✅ [채널] 오더북 데이터 전송 성공 (그룹 %d, 메시지 %d)", groupIndex, messageCount)
+							}
 						default:
 							// 🔧 오버플로우 개선: 경고 출력 빈도 제한
-							if bws.logger != nil {
-								bws.logger.LogError("오더북 데이터 채널 버퍼 오버플로우: %s", stream)
-							} else {
-								log.Printf("ERROR: 오더북 데이터 채널 버퍼 오버플로우: %s", stream)
-							}
+							log.Printf("❌ [오버플로우] 오더북 채널 가득참 (그룹 %d): %s", groupIndex, stream)
 
 							// 🔥 극한 상황 대비: 채널에서 가장 오래된 데이터 1개 제거 후 새 데이터 추가
 							select {
@@ -369,12 +453,12 @@ func (bws *BinanceWebSocket) handleMessages(ctx context.Context, conn *websocket
 								// 오래된 데이터 1개 제거
 								select {
 								case bws.dataChannel <- OrderbookData{Stream: stream, Data: data}:
-									// 새 데이터 추가 성공
+									log.Printf("🔄 [복구] 오더북 채널 복구 성공 (그룹 %d)", groupIndex)
 								default:
-									// 여전히 실패하면 포기
+									log.Printf("❌ [실패] 오더북 채널 복구 실패 (그룹 %d)", groupIndex)
 								}
 							default:
-								// 제거할 데이터도 없으면 포기
+								log.Printf("❌ [비어있음] 오더북 채널이 비어있음 (그룹 %d)", groupIndex)
 							}
 						}
 					} else if strings.Contains(stream, "@trade") {
@@ -389,14 +473,12 @@ func (bws *BinanceWebSocket) handleMessages(ctx context.Context, conn *websocket
 							// 🔧 일반 심볼은 채널 경유
 							select {
 							case bws.tradeChannel <- TradeData{Stream: stream, Data: data}:
-								// 성공적으로 전송됨
-							default:
-								// 🔧 오버플로우 개선: 경고 출력 빈도 제한
-								if bws.logger != nil {
-									bws.logger.LogError("체결 데이터 채널 버퍼 오버플로우: %s", stream)
-								} else {
-									log.Printf("ERROR: 체결 데이터 채널 버퍼 오버플로우: %s", stream)
+								// 🔥 채널 전송 성공 로그 (디버깅용)
+								if messageCount%5000 == 0 {
+									log.Printf("✅ [채널] 체결 데이터 전송 성공 (그룹 %d, 메시지 %d)", groupIndex, messageCount)
 								}
+							default:
+								log.Printf("❌ [오버플로우] 체결 채널 가득참 (그룹 %d): %s", groupIndex, stream)
 
 								// 🔥 극한 상황 대비: 채널에서 가장 오래된 데이터 1개 제거 후 새 데이터 추가
 								select {
@@ -404,29 +486,21 @@ func (bws *BinanceWebSocket) handleMessages(ctx context.Context, conn *websocket
 									// 오래된 데이터 1개 제거
 									select {
 									case bws.tradeChannel <- TradeData{Stream: stream, Data: data}:
-										// 새 데이터 추가 성공
+										log.Printf("🔄 [복구] 체결 채널 복구 성공 (그룹 %d)", groupIndex)
 									default:
-										// 여전히 실패하면 포기
+										log.Printf("❌ [실패] 체결 채널 복구 실패 (그룹 %d)", groupIndex)
 									}
 								default:
-									// 제거할 데이터도 없으면 포기
+									log.Printf("❌ [비어있음] 체결 채널이 비어있음 (그룹 %d)", groupIndex)
 								}
 							}
 						}
 					}
 				} else {
-					if bws.logger != nil {
-						bws.logger.LogError("data 필드 파싱 실패: %v", msg)
-					} else {
-						log.Printf("❌ data 필드 파싱 실패: %v", msg)
-					}
+					log.Printf("❌ [파싱] data 필드 파싱 실패 (그룹 %d): %v", groupIndex, msg)
 				}
 			} else {
-				if bws.logger != nil {
-					bws.logger.LogError("stream 필드 파싱 실패: %v", msg)
-				} else {
-					log.Printf("❌ stream 필드 파싱 실패: %v", msg)
-				}
+				log.Printf("❌ [파싱] stream 필드 파싱 실패 (그룹 %d): %v", groupIndex, msg)
 			}
 		}
 	}
@@ -434,10 +508,17 @@ func (bws *BinanceWebSocket) handleMessages(ctx context.Context, conn *websocket
 
 // startWorkerPool 워커 풀 시작 (🔥 고루틴 누수 수정)
 func (bws *BinanceWebSocket) startWorkerPool() {
+	// 🚨 중복 워커 생성 방지: 이미 워커가 있으면 생성하지 않음
+	if len(bws.dataChannel) == cap(bws.dataChannel) && len(bws.tradeChannel) == cap(bws.tradeChannel) {
+		// 채널이 가득 차 있다면 이미 워커가 동작 중일 가능성
+		if bws.logger != nil {
+			bws.logger.LogConnection("워커 풀 이미 실행 중 - 건너뛰기")
+		}
+		return
+	}
+
 	if bws.logger != nil {
-		bws.logger.LogConnection("워커 풀 함수 진입")
-	} else {
-		log.Printf("🔧 워커 풀 함수 진입")
+		bws.logger.LogConnection("워커 풀 시작 (%d개)", bws.workerCount)
 	}
 
 	// 🔥 고루틴 누수 수정: 오더북 워커들을 wg에 추가
@@ -445,11 +526,9 @@ func (bws *BinanceWebSocket) startWorkerPool() {
 		bws.wg.Add(1)
 		go func(workerID int) {
 			defer bws.wg.Done()
-			bws.orderbookWorker(workerID)
+			log.Printf("🔧 [WORKER] 오더북 워커 %d 시작", workerID)
+			bws.orderbookWorker(bws.ctx, workerID) // 🔥 context 전달
 		}(i)
-		if bws.logger != nil {
-			bws.logger.LogConnection("오더북 워커 %d 시작", i)
-		}
 	}
 
 	// 🔥 고루틴 누수 수정: 체결 워커들을 wg에 추가
@@ -457,39 +536,61 @@ func (bws *BinanceWebSocket) startWorkerPool() {
 		bws.wg.Add(1)
 		go func(workerID int) {
 			defer bws.wg.Done()
-			bws.tradeWorker(workerID)
+			log.Printf("🔧 [WORKER] 체결 워커 %d 시작", workerID)
+			bws.tradeWorker(bws.ctx, workerID) // 🔥 context 전달
 		}(i)
-		if bws.logger != nil {
-			bws.logger.LogConnection("체결 워커 %d 시작", i)
-		}
 	}
 
 	if bws.logger != nil {
 		bws.logger.LogConnection("워커 풀 시작 완료: 오더북 %d개, 체결 %d개", bws.workerCount/2, bws.workerCount/2)
-	} else {
-		log.Printf("🔧 워커 풀 시작 완료: 오더북 %d개, 체결 %d개", bws.workerCount/2, bws.workerCount/2)
 	}
 }
 
 // orderbookWorker 오더북 워커
-func (bws *BinanceWebSocket) orderbookWorker(id int) {
+func (bws *BinanceWebSocket) orderbookWorker(ctx context.Context, id int) {
+	processedCount := 0
+
 	for {
 		select {
-		case <-bws.ctx.Done():
+		case <-ctx.Done():
+			log.Printf("🔴 오더북 워커 %d 컨텍스트 종료", id)
 			return
 		case data := <-bws.dataChannel:
+			// 🔥 워커 활동 시간 업데이트
+			bws.mu.Lock()
+			bws.lastWorkerActivity = time.Now()
+			bws.mu.Unlock()
+
+			processedCount++
+			// 🔥 간소화: 1000개마다만 로그 출력
+			if processedCount%1000 == 0 {
+				log.Printf("🔧 [WORKER] 오더북 워커 %d: %dk개 처리", id, processedCount/1000)
+			}
 			bws.processOrderbookData(data.Stream, data.Data)
 		}
 	}
 }
 
 // tradeWorker 체결 워커
-func (bws *BinanceWebSocket) tradeWorker(id int) {
+func (bws *BinanceWebSocket) tradeWorker(ctx context.Context, id int) {
+	processedCount := 0
+
 	for {
 		select {
-		case <-bws.ctx.Done():
+		case <-ctx.Done():
+			log.Printf("🔴 체결 워커 %d 컨텍스트 종료", id)
 			return
 		case data := <-bws.tradeChannel:
+			// 🔥 워커 활동 시간 업데이트
+			bws.mu.Lock()
+			bws.lastWorkerActivity = time.Now()
+			bws.mu.Unlock()
+
+			processedCount++
+			// 🔥 간소화: 500개마다만 로그 출력
+			if processedCount%500 == 0 {
+				log.Printf("🔧 [WORKER] 체결 워커 %d: %d개 처리", id, processedCount)
+			}
 			bws.processTradeData(data.Stream, data.Data)
 		}
 	}
@@ -653,73 +754,17 @@ func (bws *BinanceWebSocket) processTradeData(stream string, data map[string]int
 			if hftDetector, ok := bws.hftDetector.(interface{ OnTradeReceivedFromMemory(trade *memory.TradeData) }); ok {
 				hftDetector.OnTradeReceivedFromMemory(hftTrade)
 			}
+
+			// 🔥 메모리와 캐시에 저장 (동기식으로 변경하여 고루틴 누수 방지)
+			if bws.cacheManager != nil {
+				bws.cacheManager.AddTrade(hftTrade) // 에러 무시
+			}
+			bws.memManager.AddTrade(hftTrade)
 		}
 	}
 
-	// 🔥 나머지 무거운 작업들은 별도 고루틴에서 비동기 처리 (HFT에 영향 없음)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("❌ Trade 처리 중 panic 복구: %v", r)
-			}
-		}()
-
-		// 지연 모니터링 (비동기)
-		if bws.latencyMonitor != nil {
-			if eventTimeRaw, ok := data["E"].(float64); ok {
-				eventTime := time.Unix(0, int64(eventTimeRaw)*int64(time.Millisecond))
-				latency, isWarning := bws.latencyMonitor.RecordLatency(symbol, "trade", eventTime, time.Now())
-				if isWarning {
-					bws.logger.LogLatency("밀림 감지: symbol=%s, type=trade, latency=%.2f초", symbol, latency)
-				}
-			}
-		}
-
-		// 체결 데이터 파싱 (비동기)
-		price, ok := data["p"].(string)
-		if !ok {
-			return
-		}
-		quantity, ok := data["q"].(string)
-		if !ok {
-			return
-		}
-		side, ok := data["m"].(bool)
-		if !ok {
-			return
-		}
-		tradeID, ok := data["t"].(float64)
-		if !ok {
-			return
-		}
-		timestampMs, ok := data["T"].(float64)
-		if !ok {
-			return
-		}
-
-		sideStr := "SELL"
-		if !side {
-			sideStr = "BUY"
-		}
-
-		trade := &memory.TradeData{
-			Exchange:  "binance",
-			Symbol:    symbol,
-			Timestamp: time.Unix(0, int64(timestampMs)*int64(time.Millisecond)),
-			Price:     price,
-			Quantity:  quantity,
-			Side:      sideStr,
-			TradeID:   strconv.FormatInt(int64(tradeID), 10),
-		}
-
-		// 🔥 저장 작업 (비동기 - HFT에 영향 없음)
-		if bws.cacheManager != nil {
-			if err := bws.cacheManager.AddTrade(trade); err != nil {
-				// 에러는 무시 (HFT 성능 우선)
-			}
-		}
-		bws.memManager.AddTrade(trade)
-	}()
+	// 🔥 지연 모니터링은 별도 함수로 분리하여 비동기 처리
+	bws.processLatencyAsync(symbol, data)
 }
 
 // processTradeDataDirect 활발한 심볼의 체결 데이터를 즉시 처리하는 경로
@@ -756,73 +801,17 @@ func (bws *BinanceWebSocket) processTradeDataDirect(stream string, data map[stri
 			if hftDetector, ok := bws.hftDetector.(interface{ OnTradeReceivedFromMemory(trade *memory.TradeData) }); ok {
 				hftDetector.OnTradeReceivedFromMemory(hftTrade)
 			}
+
+			// 🔥 메모리와 캐시에 저장 (동기식으로 변경하여 고루틴 누수 방지)
+			if bws.cacheManager != nil {
+				bws.cacheManager.AddTrade(hftTrade) // 에러 무시
+			}
+			bws.memManager.AddTrade(hftTrade)
 		}
 	}
 
-	// 🔥 나머지 무거운 작업들은 별도 고루틴에서 비동기 처리 (HFT에 영향 없음)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("❌ Trade 처리 중 panic 복구: %v", r)
-			}
-		}()
-
-		// 지연 모니터링 (비동기)
-		if bws.latencyMonitor != nil {
-			if eventTimeRaw, ok := data["E"].(float64); ok {
-				eventTime := time.Unix(0, int64(eventTimeRaw)*int64(time.Millisecond))
-				latency, isWarning := bws.latencyMonitor.RecordLatency(symbol, "trade", eventTime, time.Now())
-				if isWarning {
-					bws.logger.LogLatency("밀림 감지: symbol=%s, type=trade, latency=%.2f초", symbol, latency)
-				}
-			}
-		}
-
-		// 체결 데이터 파싱 (비동기)
-		price, ok := data["p"].(string)
-		if !ok {
-			return
-		}
-		quantity, ok := data["q"].(string)
-		if !ok {
-			return
-		}
-		side, ok := data["m"].(bool)
-		if !ok {
-			return
-		}
-		tradeID, ok := data["t"].(float64)
-		if !ok {
-			return
-		}
-		timestampMs, ok := data["T"].(float64)
-		if !ok {
-			return
-		}
-
-		sideStr := "SELL"
-		if !side {
-			sideStr = "BUY"
-		}
-
-		trade := &memory.TradeData{
-			Exchange:  "binance",
-			Symbol:    symbol,
-			Timestamp: time.Unix(0, int64(timestampMs)*int64(time.Millisecond)),
-			Price:     price,
-			Quantity:  quantity,
-			Side:      sideStr,
-			TradeID:   strconv.FormatInt(int64(tradeID), 10),
-		}
-
-		// 🔥 저장 작업 (비동기 - HFT에 영향 없음)
-		if bws.cacheManager != nil {
-			if err := bws.cacheManager.AddTrade(trade); err != nil {
-				// 에러는 무시 (HFT 성능 우선)
-			}
-		}
-		bws.memManager.AddTrade(trade)
-	}()
+	// 🔥 지연 모니터링은 별도 함수로 분리하여 비동기 처리
+	bws.processLatencyAsync(symbol, data)
 }
 
 // isFastTrackSymbol 활발한 심볼인지 확인
@@ -895,7 +884,7 @@ func (bws *BinanceWebSocket) isFastTrackSymbol(symbol string) bool {
 }
 
 // symbolCountReportRoutine 구독 중인 심볼 개수 보고 고루틴
-func (bws *BinanceWebSocket) symbolCountReportRoutine() {
+func (bws *BinanceWebSocket) symbolCountReportRoutine(ctx context.Context) {
 	ticker := time.NewTicker(bws.batchStats.reportInterval)
 	defer ticker.Stop()
 
@@ -903,8 +892,8 @@ func (bws *BinanceWebSocket) symbolCountReportRoutine() {
 
 	for {
 		select {
-		case <-bws.ctx.Done():
-			log.Printf("🔴 WebSocket 심볼 보고 고루틴 종료 (인스턴스: %p)", bws)
+		case <-ctx.Done():
+			log.Printf("🔴 WebSocket 심볼 보고 고루틴 컨텍스트 종료 (인스턴스: %p)", bws)
 			return
 		case <-ticker.C:
 			bws.reportSymbolCount()
@@ -938,3 +927,89 @@ func (bws *BinanceWebSocket) GetWorkerPoolStats() map[string]interface{} {
 		"is_connected":           bws.isConnected,
 	}
 }
+
+// processLatencyAsync 지연 모니터링 비동기 처리 (고루틴 누수 방지)
+func (bws *BinanceWebSocket) processLatencyAsync(symbol string, data map[string]interface{}) {
+	// 🔥 고루틴 생성 제거 - 동기 처리로 변경
+	defer func() {
+		if r := recover(); r != nil {
+			if bws.logger != nil {
+				bws.logger.LogError("지연 모니터링 중 panic: %v", r)
+			}
+		}
+	}()
+
+	// 🔥 컨텍스트 체크 추가
+	select {
+	case <-bws.ctx.Done():
+		return // 시스템 종료 중이면 지연 모니터링 중단
+	default:
+	}
+
+	if bws.latencyMonitor != nil {
+		if eventTimeRaw, ok := data["E"].(float64); ok {
+			eventTime := time.Unix(0, int64(eventTimeRaw)*int64(time.Millisecond))
+			bws.latencyMonitor.RecordLatency(symbol, "trade", eventTime, time.Now())
+		}
+	}
+}
+
+// healthCheckRoutine 연결 건강성 모니터링 (좀비 연결 방지)
+func (bws *BinanceWebSocket) healthCheckRoutine(ctx context.Context) {
+	log.Printf("🩺 WebSocket 건강성 모니터링 시작 (30초 간격)")
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("🔴 건강성 모니터링 컨텍스트 종료")
+			bws.healthCheckTicker.Stop()
+			return
+		case <-bws.healthCheckTicker.C:
+			now := time.Now()
+
+			// 🚨 메시지 수신 중단 체크 (5분간 메시지 없음)
+			timeSinceLastMessage := now.Sub(bws.lastMessageTime)
+			if timeSinceLastMessage > 5*time.Minute {
+				log.Printf("🚨 [CRITICAL] 좀비 연결 감지: %.1f분간 메시지 없음", timeSinceLastMessage.Minutes())
+				log.Printf("📊 [STATS] 총 %d개 메시지 처리 후 중단됨", bws.messageCounter)
+				log.Printf("🔄 [RESTART] 좀비 연결 제거를 위해 프로그램을 재시작합니다...")
+
+				// 🚨 즉시 graceful shutdown 시작
+				go func() {
+					time.Sleep(1 * time.Second)
+					log.Printf("🛑 [SHUTDOWN] 좀비 연결 감지로 인한 종료...")
+					os.Exit(1) // exit code 1로 재시작 신호
+				}()
+				return
+			}
+
+			// 🕐 24시간 연결 시간 체크 (바이낸스 강제 종료 전 선제적 재연결)
+			connectionUptime := now.Sub(bws.connectionStartTime)
+			if connectionUptime > 23*time.Hour+30*time.Minute { // 23.5시간 후 선제적 재연결
+				log.Printf("🔄 [PREEMPTIVE] 24시간 연결 유지로 인한 선제적 재시작")
+				log.Printf("📊 [STATS] 연결 시간: %.1f시간, 처리 메시지: %d개", connectionUptime.Hours(), bws.messageCounter)
+				log.Printf("🔄 [RESTART] 바이낸스 강제 종료 전 선제적 재시작...")
+
+				// 🚨 즉시 graceful shutdown 시작
+				go func() {
+					time.Sleep(1 * time.Second)
+					log.Printf("🛑 [SHUTDOWN] 24시간 타이머로 인한 종료...")
+					os.Exit(1) // exit code 1로 재시작 신호
+				}()
+				return
+			}
+
+			// 🩺 주기적 건강성 리포트 (10분마다)
+			if int(timeSinceLastMessage.Minutes())%10 == 0 && timeSinceLastMessage.Seconds() < 60 {
+				log.Printf("🩺 [HEALTH] 연결 정상: 최근 메시지 %.1f분 전, 연결 시간 %.1f시간",
+					timeSinceLastMessage.Minutes(), connectionUptime.Hours())
+			}
+		}
+	}
+}
+
+// 🔥 재연결 로직 제거 - 이제 오류시 안전한 재시작 사용
+// attemptReconnection과 fullReconnection 함수들은 제거됨
+// WebSocket 오류 발생시 즉시 프로그램을 재시작하여 깔끔한 상태로 복구
+
+// isFastTrackSymbol 활발한 심볼인지 확인
