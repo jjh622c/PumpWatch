@@ -48,10 +48,10 @@
     "_upbit_sync_help": "업비트 심볼 목록 갱신 주기 (분)",
     "_upbit_sync_range": "권장 범위: 30-180분",
     
-    "max_symbols_per_group": 100,
+    "max_symbols_per_group": 500,
     "_max_symbols_per_group_help": "WebSocket 그룹당 최대 심볼 수",
     "_max_symbols_per_group_tech": "바이낸스 WebSocket 제한(1024 스트림)에 맞춰 그룹을 나눔",
-    "_max_symbols_per_group_tip": "심볼당 2개 스트림(orderbook+trade)이므로 100개가 안전함",
+    "_max_symbols_per_group_tip": "🔧 단일 연결 최적화: 269개 심볼 × 2 스트림 = 538개로 단일 연결 충분 (API 제한 회피)",
     
     "report_interval_seconds": 60,
     "_report_interval_help": "WebSocket 상태 보고 주기 (초)",
@@ -113,23 +113,23 @@
     "_description": "시스템의 메모리 사용량과 성능을 최적화하는 설정",
     "_performance_tip": "이 설정들을 통해 시스템 안정성과 성능을 조절할 수 있습니다",
     
-    "orderbook_retention_minutes": 0.5,
+    "orderbook_retention_minutes": 2.0,
     "_orderbook_retention_help": "오더북 데이터 메모리 보존 시간 (분)",
     "_orderbook_retention_purpose": "펌핑 감지용으로 최근 오더북 데이터를 얼마나 오래 보관할지",
-    "_orderbook_retention_tip": "0.5분(30초)이면 충분하며, 더 길면 메모리 사용량 증가",
+    "_orderbook_retention_tip": "🔧 펌핑 데이터 수집 강화: 0.5분 → 2분으로 확장 (±5초 데이터 보장)",
     
-    "trade_retention_minutes": 1,
+    "trade_retention_minutes": 3,
     "_trade_retention_help": "체결 데이터 메모리 보존 시간 (분)",
     "_trade_retention_purpose": "펌핑 감지 계산에 사용되는 체결 히스토리 보관 시간",
-    "_trade_retention_balance": "길수록 정확하지만 메모리 사용량 증가",
+    "_trade_retention_balance": "🔧 펌핑 데이터 수집 강화: 1분 → 3분으로 확장 (±5초 데이터 보장)",
     
-    "max_orderbooks_per_symbol": 50,
+    "max_orderbooks_per_symbol": 1000,
     "_max_orderbooks_help": "심볼당 최대 오더북 개수",
-    "_max_orderbooks_tip": "50개면 대부분의 경우 충분함",
+    "_max_orderbooks_tip": "🔧 펌핑 데이터 수집 최대 강화: 50개 → 1000개로 확장 (인기 코인 20초분 보장)",
     
-    "max_trades_per_symbol": 100,
+    "max_trades_per_symbol": 2000,
     "_max_trades_help": "심볼당 최대 체결 개수",
-    "_max_trades_tip": "100개면 1-2분의 거래 히스토리 저장 가능",
+    "_max_trades_tip": "🔧 펌핑 데이터 수집 극한 강화: 100개 → 2000개로 확장 (인기 코인 40초분 보장)",
     
     "cleanup_interval_minutes": 10,
     "_cleanup_interval_help": "메모리 정리 주기 (분)",
@@ -139,16 +139,17 @@
     "_compression_interval_help": "체결 데이터 압축 주기 (초)",
     "_compression_purpose": "메모리 사용량 최적화를 위한 데이터 압축",
     
-    "heap_warning_mb": 100.0,
+    "heap_warning_mb": 1000.0,
     "_heap_warning_help": "힙 메모리 경고 임계값 (MB)",
-    "_heap_warning_tip": "이 값을 초과하면 경고 로그가 출력됨",
+    "_heap_warning_tip": "🔧 메모리 확장에 따른 임계값 상향: 100MB → 1000MB",
     
-    "gc_threshold_orderbooks": 50,
+    "gc_threshold_orderbooks": 1000,
     "_gc_threshold_orderbooks_help": "강제 GC 실행을 위한 오더북 정리 임계값",
-    "_gc_purpose": "메모리 사용량이 높아지면 강제로 가비지 컬렉션 실행",
+    "_gc_purpose": "🔧 메모리 확장에 따른 GC 임계값 상향: 50 → 1000",
     
-    "gc_threshold_trades": 200,
+    "gc_threshold_trades": 4000,
     "_gc_threshold_trades_help": "강제 GC 실행을 위한 체결 정리 임계값",
+    "_gc_note": "🔧 메모리 확장에 따른 GC 임계값 상향: 200 → 4000",
     
     "max_goroutines": 100,
     "_max_goroutines_help": "고루틴 수 경고 임계값",

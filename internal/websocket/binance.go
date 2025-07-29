@@ -122,7 +122,7 @@ func NewBinanceWebSocket(
 	bws.lastMessageTime = now
 	bws.connectionStartTime = now
 	bws.messageCounter = 0
-	bws.healthCheckTicker = time.NewTicker(30 * time.Second) // 30초마다 건강성 체크
+	bws.healthCheckTicker = time.NewTicker(60 * time.Second) // 60초마다 건강성 체크
 
 	// 🔧 고루틴 누수 방지: wg에 추가하고 정리 보장
 	bws.wg.Add(2) // symbolCountReportRoutine + healthCheckRoutine
@@ -316,19 +316,56 @@ func (bws *BinanceWebSocket) connectToGroup(ctx context.Context, group []string,
 	streamParam := strings.Join(streams, "/")
 	url := fmt.Sprintf("wss://stream.binance.com:9443/stream?streams=%s", streamParam)
 
-	log.Printf("🔗 [그룹 %d] 연결 시도: %d개 심볼", groupIndex, len(group))
+	log.Printf("🔗 [그룹 %d] 연결 시도: %d개 심볼, %d개 스트림", groupIndex, len(group), len(streams))
 
-	// WebSocket 연결에 타임아웃 설정
-	dialer := websocket.Dialer{
-		HandshakeTimeout: 10 * time.Second,
+	// 🚨 바이낸스 API 제한 대응: 연결 재시도 전략
+	maxRetries := 3
+	baseDelay := 5 * time.Second
+
+	var conn *websocket.Conn
+	var err error
+	var attempt int
+
+	for attempt = 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			// 지수 백오프: 5초, 10초, 20초
+			delay := baseDelay * time.Duration(1<<attempt)
+			log.Printf("🔄 [그룹 %d] 연결 재시도 %d/%d (대기: %v) - 바이낸스 API 제한 고려",
+				groupIndex, attempt+1, maxRetries, delay)
+
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return fmt.Errorf("연결 중단됨")
+			}
+		}
+
+		// WebSocket 연결에 타임아웃 설정
+		dialer := websocket.Dialer{
+			HandshakeTimeout: 15 * time.Second, // 10초 → 15초로 확장
+		}
+		conn, _, err = dialer.Dial(url, nil)
+		if err == nil {
+			break // 연결 성공
+		}
+
+		log.Printf("❌ [그룹 %d] 연결 시도 %d 실패: %v", groupIndex, attempt+1, err)
+
+		// 429 (Rate Limit) 또는 특정 오류 패턴 감지
+		if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "too many requests") {
+			log.Printf("🚨 [API LIMIT] 바이낸스 연결 제한 감지 - 더 긴 대기 시간 적용")
+			baseDelay = 30 * time.Second // 30초로 확장
+		}
 	}
-	conn, _, err := dialer.Dial(url, nil)
+
 	if err != nil {
-		log.Printf("❌ [그룹 %d] WebSocket 연결 실패: %v", groupIndex, err)
-		return fmt.Errorf("WebSocket 연결 실패: %v", err)
+		log.Printf("❌ [그룹 %d] 모든 연결 시도 실패 (%d회): %v", groupIndex, maxRetries, err)
+		log.Printf("🚨 [API LIMIT] 바이낸스 제한: IP당 5분마다 300회 연결, 단일 연결당 1024 스트림")
+		log.Printf("💡 [TIP] 현재 %d개 스트림으로 단일 연결 최적화됨", len(streams))
+		return fmt.Errorf("WebSocket 연결 실패 (모든 재시도 소진): %v", err)
 	}
 
-	log.Printf("✅ [그룹 %d] WebSocket 연결 성공", groupIndex)
+	log.Printf("✅ [그룹 %d] WebSocket 연결 성공 (시도 횟수: %d회)", groupIndex, attempt+1)
 
 	// 연결 설정 개선
 	conn.SetReadLimit(2 * 1024 * 1024) // 2MB (기존 1MB에서 증가)
@@ -378,8 +415,8 @@ func (bws *BinanceWebSocket) handleMessages(ctx context.Context, conn *websocket
 	messageCount := 0
 	lastMessageTime := time.Now()
 
-	// 🔥 ReadJSON 타임아웃 설정 (30초)
-	readTimeout := 30 * time.Second
+	// 🔥 ReadJSON 타임아웃 설정 (60초로 확장)
+	readTimeout := 60 * time.Second
 
 	for {
 		select {
@@ -956,7 +993,7 @@ func (bws *BinanceWebSocket) processLatencyAsync(symbol string, data map[string]
 
 // healthCheckRoutine 연결 건강성 모니터링 (좀비 연결 방지)
 func (bws *BinanceWebSocket) healthCheckRoutine(ctx context.Context) {
-	log.Printf("🩺 WebSocket 건강성 모니터링 시작 (30초 간격)")
+	log.Printf("🩺 WebSocket 건강성 모니터링 시작 (60초 간격)")
 
 	for {
 		select {
@@ -967,11 +1004,16 @@ func (bws *BinanceWebSocket) healthCheckRoutine(ctx context.Context) {
 		case <-bws.healthCheckTicker.C:
 			now := time.Now()
 
-			// 🚨 메시지 수신 중단 체크 (5분간 메시지 없음)
+			// 🚨 메시지 수신 중단 체크 (2분간 메시지 없음)
 			timeSinceLastMessage := now.Sub(bws.lastMessageTime)
-			if timeSinceLastMessage > 5*time.Minute {
-				log.Printf("🚨 [CRITICAL] 좀비 연결 감지: %.1f분간 메시지 없음", timeSinceLastMessage.Minutes())
+			if timeSinceLastMessage > 2*time.Minute {
+				log.Printf("🚨 [CRITICAL] 좀비 연결 감지: %.1f분간 메시지 없음 (초당 수천개 메시지가 정상)", timeSinceLastMessage.Minutes())
 				log.Printf("📊 [STATS] 총 %d개 메시지 처리 후 중단됨", bws.messageCounter)
+				log.Printf("🔍 [DIAGNOSTIC] 연결 시작: %s, 마지막 메시지: %s",
+					bws.connectionStartTime.Format("2006-01-02 15:04:05"),
+					bws.lastMessageTime.Format("2006-01-02 15:04:05"))
+				log.Printf("🔗 [CONNECTION] 활성 연결 수: %d개, 심볼 수: %d개", len(bws.connections), len(bws.symbols))
+				log.Printf("⚠️ [API LIMIT] 바이낸스 제한: IP당 5분마다 300회 연결 제한 - 재연결 신중 진행")
 				log.Printf("🔄 [RESTART] 좀비 연결 제거를 위해 프로그램을 재시작합니다...")
 
 				// 🚨 즉시 graceful shutdown 시작
@@ -988,6 +1030,8 @@ func (bws *BinanceWebSocket) healthCheckRoutine(ctx context.Context) {
 			if connectionUptime > 23*time.Hour+30*time.Minute { // 23.5시간 후 선제적 재연결
 				log.Printf("🔄 [PREEMPTIVE] 24시간 연결 유지로 인한 선제적 재시작")
 				log.Printf("📊 [STATS] 연결 시간: %.1f시간, 처리 메시지: %d개", connectionUptime.Hours(), bws.messageCounter)
+				log.Printf("💡 [BINANCE] 바이낸스 24시간 자동 종료 전 선제적 대응")
+				log.Printf("⚠️ [API LIMIT] 재연결 시 바이낸스 IP 제한 (5분마다 300회) 고려됨")
 				log.Printf("🔄 [RESTART] 바이낸스 강제 종료 전 선제적 재시작...")
 
 				// 🚨 즉시 graceful shutdown 시작
