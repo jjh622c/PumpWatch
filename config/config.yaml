@@ -1,0 +1,96 @@
+# METDC v2.0 System Configuration
+
+# Server settings
+server:
+  host: "localhost"
+  port: 8080
+  timeout: "30s"
+
+# Upbit monitoring settings
+upbit:
+  enabled: true
+  api_url: "https://api-manager.upbit.com/api/v1/announcements?os=web&page=1&per_page=20&category=trade"
+  poll_interval: "5s" 
+  timeout: "10s"
+  user_agent: "METDC-v2.0"
+
+# Exchange WebSocket configurations
+exchanges:
+  binance:
+    enabled: true
+    spot_endpoint: "wss://stream.binance.com:9443/ws"
+    futures_endpoint: "wss://fstream.binance.com/ws"
+    max_symbols_per_connection: 100
+    retry_cooldown: "5s"
+    max_retries: 10
+    connection_timeout: "30s"
+    read_timeout: "30s" 
+    write_timeout: "10s"
+  
+  bybit:
+    enabled: true
+    spot_endpoint: "wss://stream.bybit.com/v5/public/spot"
+    futures_endpoint: "wss://stream.bybit.com/v5/public/linear"
+    max_symbols_per_connection: 50
+    retry_cooldown: "5s"
+    max_retries: 10
+    connection_timeout: "30s"
+    read_timeout: "30s"
+    write_timeout: "10s"
+    
+  kucoin:
+    enabled: true
+    spot_endpoint: "wss://ws-api.kucoin.com/endpoint"
+    futures_endpoint: "wss://ws-api-futures.kucoin.com/endpoint"
+    max_symbols_per_connection: 100
+    retry_cooldown: "5s"
+    max_retries: 10
+    connection_timeout: "30s"
+    read_timeout: "30s"
+    write_timeout: "10s"
+    
+  okx:
+    enabled: true
+    spot_endpoint: "wss://ws.okx.com:8443/ws/v5/public"
+    futures_endpoint: "wss://ws.okx.com:8443/ws/v5/public"
+    max_symbols_per_connection: 100
+    retry_cooldown: "5s"
+    max_retries: 10
+    connection_timeout: "30s"
+    read_timeout: "30s"
+    write_timeout: "10s"
+    
+  gate:
+    enabled: true
+    spot_endpoint: "wss://api.gateio.ws/ws/v4/"
+    futures_endpoint: "wss://fx-ws.gateio.ws/v4/ws"
+    max_symbols_per_connection: 100
+    retry_cooldown: "5s"
+    max_retries: 10
+    connection_timeout: "30s"
+    read_timeout: "30s"
+    write_timeout: "10s"
+    
+  phemex:
+    enabled: true
+    spot_endpoint: "wss://ws.phemex.com"
+    futures_endpoint: "wss://ws.phemex.com"
+    max_symbols_per_connection: 20
+    retry_cooldown: "5s"
+    max_retries: 10
+    connection_timeout: "30s"
+    read_timeout: "30s"
+    write_timeout: "10s"
+
+# Storage settings
+storage:
+  data_dir: "./data"
+  raw_data_enabled: true
+  analysis_enabled: true
+  cleanup_after_days: 30
+
+# Analysis settings
+analysis:
+  pump_threshold: 3.0  # 3% price increase threshold
+  time_window_seconds: 1
+  min_volume_ratio: 2.0
