@@ -80,20 +80,20 @@ func main() {
 	storageManager := storage.NewManager(cfg.Storage)
 	logging.Info("✅ Storage manager initialized")
 	
-	// Initialize SafeTaskManager - Memory Leak Free WebSocket Architecture
-	taskManager := websocket.NewSafeTaskManager(cfg)
-	if taskManager == nil {
-		logging.Fatal("❌ Failed to initialize SafeTaskManager")
+	// Initialize EnhancedTaskManager - Complete Data Collection Architecture
+	taskManager, err := websocket.NewEnhancedTaskManager(ctx, cfg.Exchanges, symbolsConfig, storageManager)
+	if err != nil {
+		logging.Fatal("❌ Failed to initialize EnhancedTaskManager: %v", err)
 	}
 
-	logging.Info("✅ SafeTaskManager initialized - 메모리 누수 없는 단일 고루틴 아키텍처")
+	logging.Info("✅ EnhancedTaskManager initialized - 완전한 20초 타이머 데이터 수집 아키텍처")
 	
 	// Start WebSocket Task Manager
 	if err := taskManager.Start(); err != nil {
 		logging.Fatal("❌ Failed to start WebSocket Task Manager: %v", err)
 	}
 	
-	logging.Info("🚀 SafeTaskManager started - 단일 고루틴 아키텍처로 메모리 안전성 확보")
+	logging.Info("🚀 EnhancedTaskManager started - 완전한 데이터 수집 및 20초 타이머 아키텍처")
 	
 	// Initialize Upbit Monitor
 	upbitMonitor, err := monitor.NewUpbitMonitor(ctx, cfg.Upbit, taskManager, storageManager)
@@ -112,7 +112,7 @@ func main() {
 	logging.Info("🎯 System ready - monitoring for Upbit KRW listing announcements...")
 	
 	// System status reporting
-	go systemStatusReporter(ctx, taskManager, upbitMonitor)
+	go systemStatusReporter(ctx, upbitMonitor)
 	
 	// Wait for shutdown signal
 	sigChan := make(chan os.Signal, 1)
@@ -191,38 +191,22 @@ func initializeSymbols(path string) error {
 }
 
 // systemStatusReporter periodically reports system status
-func systemStatusReporter(ctx context.Context, taskManager *websocket.SafeTaskManager, upbitMonitor *monitor.UpbitMonitor) {
+func systemStatusReporter(ctx context.Context, upbitMonitor *monitor.UpbitMonitor) {
 	ticker := time.NewTicker(60 * time.Second) // Every minute
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// SafeTaskManager health status
-			health := taskManager.GetHealthStatus()
-			logging.Info("📊 SafeTaskManager 상태 - 가동시간: %s, 건강점수: %.2f, 워커: %s, 거래: %d개, 에러: %d개",
-				health["uptime"], health["health_score"], health["workers"],
-				health["trades"], health["errors"])
+			// EnhancedTaskManager는 별도 상태 보고 시스템 사용
+			logging.Info("🚀 EnhancedTaskManager 운영 중 - 완전한 20초 타이머 데이터 수집 시스템")
 
-			// 상세 풀 정보
-			if poolsDetail, ok := health["pools_detail"].(map[string]interface{}); ok {
-				activePoolsCount := 0
-				for poolName, poolInfo := range poolsDetail {
-					if info, ok := poolInfo.(map[string]interface{}); ok {
-						logging.Info("  📊 %s: 워커 %s, 거래 %d개",
-							poolName, info["workers"], info["trades"])
-						activePoolsCount++
-					}
-				}
-				logging.Info("🛡️ SafeWorkerPool 상태 - 활성 풀: %d개, 메모리 누수 없는 아키텍처 운영 중", activePoolsCount)
-			}
-			
 			// Upbit monitor status
 			monitorStats := upbitMonitor.GetStats()
 			logging.Info("📡 Monitor Stats - Polls: %d, Detections: %d, Last Check: %v ago",
-				monitorStats.TotalPolls, monitorStats.DetectedListings, 
+				monitorStats.TotalPolls, monitorStats.DetectedListings,
 				time.Since(monitorStats.LastCheck))
 		}
 	}
