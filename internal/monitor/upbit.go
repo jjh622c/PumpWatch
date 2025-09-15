@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,18 +27,18 @@ type UpbitMonitor struct {
 	httpClient     *http.Client
 	taskManager    DataCollectionManager
 	storageManager *storage.Manager
-	
+
 	// State management
 	ctx            context.Context
 	cancel         context.CancelFunc
 	ticker         *time.Ticker
 	running        bool
 	mu             sync.RWMutex
-	
+
 	// Statistics
 	stats          MonitorStats
 	lastCheck      time.Time
-	
+
 	// Notification cache to prevent duplicate processing
 	processedNotices map[string]time.Time
 	processMutex     sync.RWMutex
@@ -58,7 +59,7 @@ type MonitorStats struct {
 // NewUpbitMonitor creates a new Upbit monitor
 func NewUpbitMonitor(ctx context.Context, config config.UpbitConfig, taskManager DataCollectionManager, storageManager *storage.Manager) (*UpbitMonitor, error) {
 	monitorCtx, cancel := context.WithCancel(ctx)
-	
+
 	monitor := &UpbitMonitor{
 		config:           config,
 		taskManager:      taskManager,
@@ -73,7 +74,7 @@ func NewUpbitMonitor(ctx context.Context, config config.UpbitConfig, taskManager
 			LastCheck: time.Now(),
 		},
 	}
-	
+
 	return monitor, nil
 }
 
@@ -81,21 +82,21 @@ func NewUpbitMonitor(ctx context.Context, config config.UpbitConfig, taskManager
 func (um *UpbitMonitor) Start() error {
 	um.mu.Lock()
 	defer um.mu.Unlock()
-	
+
 	if um.running {
 		return fmt.Errorf("monitor is already running")
 	}
-	
+
 	if !um.config.Enabled {
 		return fmt.Errorf("Upbit monitoring is disabled in configuration")
 	}
-	
+
 	um.ticker = time.NewTicker(um.config.PollInterval)
 	um.running = true
-	
+
 	// Start monitoring goroutine
 	go um.monitorLoop()
-	
+
 	fmt.Printf("📡 Upbit Monitor started - polling every %v\n", um.config.PollInterval)
 	return nil
 }
@@ -104,21 +105,21 @@ func (um *UpbitMonitor) Start() error {
 func (um *UpbitMonitor) Stop(ctx context.Context) error {
 	um.mu.Lock()
 	defer um.mu.Unlock()
-	
+
 	if !um.running {
 		return nil
 	}
-	
+
 	um.running = false
 	if um.ticker != nil {
 		um.ticker.Stop()
 	}
-	
+
 	um.cancel()
-	
+
 	// Clean up processed notices (older than 1 hour)
 	um.cleanupProcessedNotices()
-	
+
 	fmt.Println("📡 Upbit Monitor stopped")
 	return nil
 }
@@ -137,7 +138,7 @@ func (um *UpbitMonitor) monitorLoop() {
 			fmt.Printf("❌ Upbit monitor panic recovered: %v\n", r)
 		}
 	}()
-	
+
 	for {
 		select {
 		case <-um.ctx.Done():
@@ -151,23 +152,23 @@ func (um *UpbitMonitor) monitorLoop() {
 // checkForListings polls Upbit API for new announcements
 func (um *UpbitMonitor) checkForListings() {
 	startTime := time.Now()
-	
+
 	um.mu.Lock()
 	um.stats.TotalPolls++
 	um.stats.LastCheck = startTime
 	um.mu.Unlock()
-	
+
 	// Fetch announcements
 	announcements, err := um.fetchAnnouncements()
 	if err != nil {
 		fmt.Printf("⚠️ Failed to fetch Upbit announcements: %v\n", err)
 		return
 	}
-	
+
 	// Update response time
 	responseTime := time.Since(startTime)
 	um.updateAverageResponseTime(responseTime)
-	
+
 	// Process announcements for listings
 	for _, announcement := range announcements {
 		if um.shouldProcessAnnouncement(announcement) {
@@ -184,33 +185,33 @@ func (um *UpbitMonitor) fetchAnnouncements() ([]UpbitAnnouncement, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	
+
 	req.Header.Set("User-Agent", um.config.UserAgent)
-	
+
 	resp, err := um.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("API returned status: %d", resp.StatusCode)
 	}
-	
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
-	
+
 	var response UpbitAPIResponse
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON: %w", err)
 	}
-	
+
 	if !response.Success {
 		return nil, fmt.Errorf("API returned unsuccessful response")
 	}
-	
+
 	return response.Data.Notices, nil
 }
 
@@ -219,38 +220,45 @@ func (um *UpbitMonitor) shouldProcessAnnouncement(announcement UpbitAnnouncement
 	um.processMutex.RLock()
 	_, alreadyProcessed := um.processedNotices[strconv.Itoa(announcement.ID)]
 	um.processMutex.RUnlock()
-	
+
 	if alreadyProcessed {
 		return false
 	}
-	
-	// Check if announcement is recent (within 15 seconds, as per Flash-upbit logic)
+
+	// Check if announcement is recent (within 30 minutes to catch all listings)
+	// Fixed: Extended from 15 seconds to 30 minutes to prevent missing listings
 	announcedAt, err := time.Parse("2006-01-02T15:04:05-07:00", announcement.ListedAt)
 	if err != nil {
 		return false
 	}
-	
-	if time.Since(announcedAt) > 15*time.Second {
+
+	if time.Since(announcedAt) > 30*time.Minute {
 		return false
 	}
-	
-	// Check badges for new listing (using API response flags)
-	return announcement.NeedNewBadge && !announcement.NeedUpdateBadge
+
+	// Fixed: Accept both new listings and updates for KRW-related announcements
+	// Check if it's KRW-related content first
+	hasKRWContent := strings.Contains(strings.ToLower(announcement.Title), "krw") ||
+		strings.Contains(strings.ToLower(announcement.Title), "신규 거래지원") ||
+		strings.Contains(strings.ToLower(announcement.Title), "마켓")
+
+	// Accept new listings OR updates that contain KRW-related content
+	return announcement.NeedNewBadge || (announcement.NeedUpdateBadge && hasKRWContent)
 }
 
 // parseListingAnnouncement parses announcement using Flash-upbit patterns
 func (um *UpbitMonitor) parseListingAnnouncement(announcement UpbitAnnouncement) *models.ListingEvent {
 	parser := NewListingParser()
-	
+
 	// Try to parse using Flash-upbit 5 patterns
 	if result := parser.ParseListing(announcement.Title); result != nil {
 		// Only process KRW listings
 		if !result.IsKRWListing {
 			return nil
 		}
-		
+
 		announcedAt, _ := time.Parse("2006-01-02T15:04:05-07:00", announcement.ListedAt)
-		
+
 		listingEvent := &models.ListingEvent{
 			ID:           strconv.Itoa(announcement.ID),
 			Title:        announcement.Title,
@@ -262,10 +270,10 @@ func (um *UpbitMonitor) parseListingAnnouncement(announcement UpbitAnnouncement)
 			TriggerTime:  announcedAt, // Use announcement time as trigger time
 			IsKRWListing: result.IsKRWListing,
 		}
-		
+
 		return listingEvent
 	}
-	
+
 	return nil
 }
 
@@ -275,13 +283,13 @@ func (um *UpbitMonitor) handleListingEvent(event *models.ListingEvent) {
 	um.processMutex.Lock()
 	um.processedNotices[event.ID] = time.Now()
 	um.processMutex.Unlock()
-	
+
 	// Update statistics
 	um.mu.Lock()
 	um.stats.DetectedListings++
 	um.stats.LastDetection = event.DetectedAt
 	um.mu.Unlock()
-	
+
 	fmt.Printf("🚨 === New KRW Listing Detected! ===\n")
 	fmt.Printf("💎 Symbol: %s\n", event.Symbol)
 	fmt.Printf("📊 Markets: %v\n", event.Markets)
@@ -290,7 +298,7 @@ func (um *UpbitMonitor) handleListingEvent(event *models.ListingEvent) {
 	fmt.Printf("🎯 Detected: %s\n", event.DetectedAt.Format("2006-01-02 15:04:05"))
 	fmt.Printf("⏱️ Detection delay: %v\n", event.DetectedAt.Sub(event.AnnouncedAt))
 	fmt.Printf("🔗 URL: %s\n", event.NoticeURL)
-	
+
 	// Trigger data collection (-20 seconds from announcement time)
 	if err := um.triggerDataCollection(event); err != nil {
 		fmt.Printf("❌ Failed to trigger data collection: %v\n", err)
@@ -309,22 +317,22 @@ func (um *UpbitMonitor) handleListingEvent(event *models.ListingEvent) {
 func (um *UpbitMonitor) triggerDataCollection(event *models.ListingEvent) error {
 	// Create collection event starting 20 seconds before announcement
 	collectionStartTime := event.AnnouncedAt.Add(-20 * time.Second)
-	
+
 	fmt.Printf("📡 Starting data collection for %s\n", event.Symbol)
 	fmt.Printf("⏰ Collection window: %s to %s (40 seconds)\n",
 		collectionStartTime.Format("15:04:05"),
 		event.AnnouncedAt.Add(20*time.Second).Format("15:04:05"))
-	
+
 	// Trigger WebSocket Task Manager to start collection
 	if err := um.taskManager.StartDataCollection(event.Symbol, event.AnnouncedAt); err != nil {
 		return fmt.Errorf("failed to start WebSocket data collection: %w", err)
 	}
-	
+
 	// Store event metadata
 	if err := um.storageManager.StoreListingEvent(event); err != nil {
 		fmt.Printf("⚠️ Failed to store listing event metadata: %v\n", err)
 	}
-	
+
 	return nil
 }
 
@@ -333,7 +341,7 @@ func (um *UpbitMonitor) triggerDataCollection(event *models.ListingEvent) error 
 func (um *UpbitMonitor) updateAverageResponseTime(responseTime time.Duration) {
 	um.mu.Lock()
 	defer um.mu.Unlock()
-	
+
 	// Simple moving average
 	if um.stats.AverageResponseTime == 0 {
 		um.stats.AverageResponseTime = responseTime
@@ -345,7 +353,7 @@ func (um *UpbitMonitor) updateAverageResponseTime(responseTime time.Duration) {
 func (um *UpbitMonitor) cleanupProcessedNotices() {
 	um.processMutex.Lock()
 	defer um.processMutex.Unlock()
-	
+
 	cutoff := time.Now().Add(-1 * time.Hour)
 	for id, processedAt := range um.processedNotices {
 		if processedAt.Before(cutoff) {
