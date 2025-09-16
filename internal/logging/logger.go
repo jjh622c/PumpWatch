@@ -64,7 +64,7 @@ func NewLogger(component string, level LogLevel, logDir string) (*Logger, error)
 		// Create daily log file
 		timestamp := time.Now().Format("20060102")
 		logFileName := filepath.Join(logDir, fmt.Sprintf("pumpwatch_%s_%s.log", component, timestamp))
-		
+
 		logFile, err := os.OpenFile(logFileName, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create log file: %w", err)
@@ -90,7 +90,7 @@ func (l *Logger) formatMessage(level LogLevel, msg string) string {
 	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
 	emoji := levelEmojis[level]
 	levelName := levelNames[level]
-	
+
 	// Get caller information
 	_, file, line, ok := runtime.Caller(3)
 	caller := "unknown"
@@ -155,7 +155,7 @@ func (l *Logger) Fatal(format string, args ...interface{}) {
 // WebSocketLogger creates a WebSocket-specific logger
 func (l *Logger) WebSocketLogger(exchange, marketType string) *Logger {
 	component := fmt.Sprintf("%s.%s.%s", l.component, exchange, marketType)
-	
+
 	wsLogger := &Logger{
 		level:      l.level,
 		output:     l.output,
@@ -163,7 +163,7 @@ func (l *Logger) WebSocketLogger(exchange, marketType string) *Logger {
 		component:  component,
 		logFile:    l.logFile, // Share the same log file
 	}
-	
+
 	return wsLogger
 }
 
@@ -227,12 +227,12 @@ var globalLogger *Logger
 // InitGlobalLogger initializes the global logger
 func InitGlobalLogger(component string, levelStr string, logDir string) error {
 	level := parseLogLevel(levelStr)
-	
+
 	logger, err := NewLogger(component, level, logDir)
 	if err != nil {
 		return err
 	}
-	
+
 	globalLogger = logger
 	return nil
 }
@@ -300,7 +300,7 @@ func RecoverPanic(component string) {
 		buf := make([]byte, 4096)
 		n := runtime.Stack(buf, false)
 		stackTrace := string(buf[:n])
-		
+
 		Error("🚨 PANIC in %s: %v\nStack trace:\n%s", component, r, stackTrace)
 	}
 }

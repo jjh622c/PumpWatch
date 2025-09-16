@@ -41,15 +41,15 @@ type SafeTaskManager struct {
 
 // SafeManagerStats는 매니저 전체 통계
 type SafeManagerStats struct {
-	TotalPools       int32 // atomic
-	TotalWorkers     int32 // atomic
-	ActiveWorkers    int32 // atomic
-	TotalSymbols     int32 // atomic
-	TotalMessages    int64 // atomic
-	TotalTrades      int64 // atomic
-	TotalErrors      int64 // atomic
-	LastActivity     int64 // atomic (unix nano)
-	SystemUptime     int64 // atomic (unix nano)
+	TotalPools    int32 // atomic
+	TotalWorkers  int32 // atomic
+	ActiveWorkers int32 // atomic
+	TotalSymbols  int32 // atomic
+	TotalMessages int64 // atomic
+	TotalTrades   int64 // atomic
+	TotalErrors   int64 // atomic
+	LastActivity  int64 // atomic (unix nano)
+	SystemUptime  int64 // atomic (unix nano)
 }
 
 // NewSafeTaskManager는 새로운 안전한 태스크 매니저 생성
@@ -441,12 +441,12 @@ func (tm *SafeTaskManager) GetHealthStatus() map[string]interface{} {
 	for key, pool := range tm.pools {
 		poolStats := pool.GetStats()
 		pools[key] = map[string]interface{}{
-			"running":     pool.IsRunning(),
-			"workers":     fmt.Sprintf("%d/%d", poolStats.ActiveWorkers, poolStats.TotalWorkers),
-			"symbols":     poolStats.TotalSymbols,
-			"messages":    poolStats.TotalMessages,
-			"trades":      poolStats.TotalTrades,
-			"errors":      poolStats.TotalErrors,
+			"running":  pool.IsRunning(),
+			"workers":  fmt.Sprintf("%d/%d", poolStats.ActiveWorkers, poolStats.TotalWorkers),
+			"symbols":  poolStats.TotalSymbols,
+			"messages": poolStats.TotalMessages,
+			"trades":   poolStats.TotalTrades,
+			"errors":   poolStats.TotalErrors,
 		}
 	}
 	tm.mu.RUnlock()

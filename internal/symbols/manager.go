@@ -40,10 +40,10 @@ func (m *Manager) UpdateFromExchanges() error {
 
 	// 2. Update symbols from each exchange
 	exchanges := []string{"binance", "bybit", "okx", "kucoin", "phemex", "gate"}
-	
+
 	for _, exchange := range exchanges {
 		fmt.Printf("📡 Updating symbols for %s...\n", exchange)
-		
+
 		switch exchange {
 		case "binance":
 			if err := m.updateBinanceSymbols(); err != nil {
@@ -92,7 +92,7 @@ func (m *Manager) GetConfig() *SymbolsConfig {
 // updateUpbitKRWSymbols fetches current Upbit KRW market symbols
 func (m *Manager) updateUpbitKRWSymbols() error {
 	url := "https://api.upbit.com/v1/market/all"
-	
+
 	resp, err := m.httpClient.Get(url)
 	if err != nil {
 		return fmt.Errorf("failed to fetch Upbit markets: %w", err)
@@ -127,7 +127,7 @@ func (m *Manager) updateUpbitKRWSymbols() error {
 
 	m.config.UpbitKRWSymbols = krwSymbols
 	fmt.Printf("📊 Updated Upbit KRW symbols: %d symbols\n", len(krwSymbols))
-	
+
 	return nil
 }
 
@@ -152,11 +152,11 @@ func (m *Manager) updateBinanceSymbols() error {
 		SpotEndpoint:            "wss://stream.binance.com:9443/ws",
 		FuturesEndpoint:         "wss://fstream.binance.com/ws",
 		MaxSymbolsPerConnection: 100,
-		RetryCooldown:          30 * time.Second,
-		MaxRetries:             5,
-		SpotSymbols:            spotSymbols,
-		FuturesSymbols:         futuresSymbols,
-		LastUpdated:            time.Now(),
+		RetryCooldown:           30 * time.Second,
+		MaxRetries:              5,
+		SpotSymbols:             spotSymbols,
+		FuturesSymbols:          futuresSymbols,
+		LastUpdated:             time.Now(),
 	}
 
 	fmt.Printf("🔸 Binance: %d spot, %d futures symbols fetched\n", len(spotSymbols), len(futuresSymbols))
@@ -184,11 +184,11 @@ func (m *Manager) updateBybitSymbols() error {
 		SpotEndpoint:            "wss://stream.bybit.com/v5/public/spot",
 		FuturesEndpoint:         "wss://stream.bybit.com/v5/public/linear",
 		MaxSymbolsPerConnection: 50,
-		RetryCooldown:          60 * time.Second,
-		MaxRetries:             3,
-		SpotSymbols:            spotSymbols,
-		FuturesSymbols:         futuresSymbols,
-		LastUpdated:            time.Now(),
+		RetryCooldown:           60 * time.Second,
+		MaxRetries:              3,
+		SpotSymbols:             spotSymbols,
+		FuturesSymbols:          futuresSymbols,
+		LastUpdated:             time.Now(),
 	}
 
 	fmt.Printf("🔸 Bybit: %d spot, %d futures symbols fetched\n", len(spotSymbols), len(futuresSymbols))
@@ -216,11 +216,11 @@ func (m *Manager) updateOKXSymbols() error {
 		SpotEndpoint:            "wss://ws.okx.com:8443/ws/v5/public",
 		FuturesEndpoint:         "wss://ws.okx.com:8443/ws/v5/public",
 		MaxSymbolsPerConnection: 100,
-		RetryCooldown:          30 * time.Second,
-		MaxRetries:             5,
-		SpotSymbols:            spotSymbols,
-		FuturesSymbols:         futuresSymbols,
-		LastUpdated:            time.Now(),
+		RetryCooldown:           30 * time.Second,
+		MaxRetries:              5,
+		SpotSymbols:             spotSymbols,
+		FuturesSymbols:          futuresSymbols,
+		LastUpdated:             time.Now(),
 	}
 
 	fmt.Printf("🔸 OKX: %d spot, %d futures symbols fetched\n", len(spotSymbols), len(futuresSymbols))
@@ -248,11 +248,11 @@ func (m *Manager) updateKuCoinSymbols() error {
 		SpotEndpoint:            "wss://ws-api.kucoin.com/endpoint",
 		FuturesEndpoint:         "wss://ws-api-futures.kucoin.com/endpoint",
 		MaxSymbolsPerConnection: 100,
-		RetryCooldown:          45 * time.Second,
-		MaxRetries:             4,
-		SpotSymbols:            spotSymbols,
-		FuturesSymbols:         futuresSymbols,
-		LastUpdated:            time.Now(),
+		RetryCooldown:           45 * time.Second,
+		MaxRetries:              4,
+		SpotSymbols:             spotSymbols,
+		FuturesSymbols:          futuresSymbols,
+		LastUpdated:             time.Now(),
 	}
 
 	fmt.Printf("🔸 KuCoin: %d spot, %d futures symbols fetched\n", len(spotSymbols), len(futuresSymbols))
@@ -265,11 +265,11 @@ func (m *Manager) updatePhemexSymbols() error {
 		SpotEndpoint:            "wss://ws.phemex.com",
 		FuturesEndpoint:         "wss://ws.phemex.com",
 		MaxSymbolsPerConnection: 20,
-		RetryCooldown:          90 * time.Second,
-		MaxRetries:             3,
-		SpotSymbols:            []string{},
-		FuturesSymbols:         []string{},
-		LastUpdated:            time.Now(),
+		RetryCooldown:           90 * time.Second,
+		MaxRetries:              3,
+		SpotSymbols:             []string{},
+		FuturesSymbols:          []string{},
+		LastUpdated:             time.Now(),
 	}
 	return nil
 }
@@ -295,11 +295,11 @@ func (m *Manager) updateGateSymbols() error {
 		SpotEndpoint:            "wss://api.gateio.ws/ws/v4/",
 		FuturesEndpoint:         "wss://fx-ws.gateio.ws/v4/ws",
 		MaxSymbolsPerConnection: 100,
-		RetryCooldown:          30 * time.Second,
-		MaxRetries:             5,
-		SpotSymbols:            spotSymbols,
-		FuturesSymbols:         futuresSymbols,
-		LastUpdated:            time.Now(),
+		RetryCooldown:           30 * time.Second,
+		MaxRetries:              5,
+		SpotSymbols:             spotSymbols,
+		FuturesSymbols:          futuresSymbols,
+		LastUpdated:             time.Now(),
 	}
 
 	fmt.Printf("🔸 Gate.io: %d spot, %d futures symbols fetched\n", len(spotSymbols), len(futuresSymbols))
@@ -318,7 +318,7 @@ func (m *Manager) generateSubscriptionLists() {
 		var spotFiltered []string
 		for _, symbol := range exchangeConfig.SpotSymbols {
 			baseSymbol := extractBaseSymbol(symbol)
-			if !upbitSymbolsMap[baseSymbol] {  // NOT in Upbit = potential new listing
+			if !upbitSymbolsMap[baseSymbol] { // NOT in Upbit = potential new listing
 				spotFiltered = append(spotFiltered, symbol)
 			}
 		}
@@ -328,7 +328,7 @@ func (m *Manager) generateSubscriptionLists() {
 		var futuresFiltered []string
 		for _, symbol := range exchangeConfig.FuturesSymbols {
 			baseSymbol := extractBaseSymbol(symbol)
-			if !upbitSymbolsMap[baseSymbol] {  // NOT in Upbit = potential new listing
+			if !upbitSymbolsMap[baseSymbol] { // NOT in Upbit = potential new listing
 				futuresFiltered = append(futuresFiltered, symbol)
 			}
 		}
@@ -360,10 +360,10 @@ func (m *Manager) fetchBinanceSpotSymbols() ([]string, error) {
 
 	var exchangeInfo struct {
 		Symbols []struct {
-			Symbol      string `json:"symbol"`
-			Status      string `json:"status"`
-			BaseAsset   string `json:"baseAsset"`
-			QuoteAsset  string `json:"quoteAsset"`
+			Symbol     string `json:"symbol"`
+			Status     string `json:"status"`
+			BaseAsset  string `json:"baseAsset"`
+			QuoteAsset string `json:"quoteAsset"`
 		} `json:"symbols"`
 	}
 
@@ -403,10 +403,10 @@ func (m *Manager) fetchBinanceFuturesSymbols() ([]string, error) {
 
 	var exchangeInfo struct {
 		Symbols []struct {
-			Symbol      string `json:"symbol"`
-			Status      string `json:"status"`
-			BaseAsset   string `json:"baseAsset"`
-			QuoteAsset  string `json:"quoteAsset"`
+			Symbol     string `json:"symbol"`
+			Status     string `json:"status"`
+			BaseAsset  string `json:"baseAsset"`
+			QuoteAsset string `json:"quoteAsset"`
 		} `json:"symbols"`
 	}
 
@@ -424,7 +424,6 @@ func (m *Manager) fetchBinanceFuturesSymbols() ([]string, error) {
 
 	return usdtSymbols, nil
 }
-
 
 // fetchBybitSpotSymbols fetches all USDT pairs from Bybit Spot API
 func (m *Manager) fetchBybitSpotSymbols() ([]string, error) {
@@ -448,10 +447,10 @@ func (m *Manager) fetchBybitSpotSymbols() ([]string, error) {
 	var instrumentsInfo struct {
 		Result struct {
 			List []struct {
-				Symbol       string `json:"symbol"`
-				Status       string `json:"status"`
-				BaseCoin     string `json:"baseCoin"`
-				QuoteCoin    string `json:"quoteCoin"`
+				Symbol    string `json:"symbol"`
+				Status    string `json:"status"`
+				BaseCoin  string `json:"baseCoin"`
+				QuoteCoin string `json:"quoteCoin"`
 			} `json:"list"`
 		} `json:"result"`
 	}
@@ -493,10 +492,10 @@ func (m *Manager) fetchBybitFuturesSymbols() ([]string, error) {
 	var instrumentsInfo struct {
 		Result struct {
 			List []struct {
-				Symbol       string `json:"symbol"`
-				Status       string `json:"status"`
-				BaseCoin     string `json:"baseCoin"`
-				QuoteCoin    string `json:"quoteCoin"`
+				Symbol    string `json:"symbol"`
+				Status    string `json:"status"`
+				BaseCoin  string `json:"baseCoin"`
+				QuoteCoin string `json:"quoteCoin"`
 			} `json:"list"`
 		} `json:"result"`
 	}
@@ -538,9 +537,9 @@ func (m *Manager) fetchOKXSpotSymbols() ([]string, error) {
 	var instrumentsInfo struct {
 		Code string `json:"code"`
 		Data []struct {
-			InstId    string `json:"instId"`
-			State     string `json:"state"`
-			InstType  string `json:"instType"`
+			InstId   string `json:"instId"`
+			State    string `json:"state"`
+			InstType string `json:"instType"`
 		} `json:"data"`
 	}
 
@@ -581,9 +580,9 @@ func (m *Manager) fetchOKXFuturesSymbols() ([]string, error) {
 	var instrumentsInfo struct {
 		Code string `json:"code"`
 		Data []struct {
-			InstId    string `json:"instId"`
-			State     string `json:"state"`
-			InstType  string `json:"instType"`
+			InstId   string `json:"instId"`
+			State    string `json:"state"`
+			InstType string `json:"instType"`
 		} `json:"data"`
 	}
 
@@ -624,11 +623,11 @@ func (m *Manager) fetchKuCoinSpotSymbols() ([]string, error) {
 	var symbolsInfo struct {
 		Code string `json:"code"`
 		Data []struct {
-			Symbol      string `json:"symbol"`
-			Name        string `json:"name"`
-			BaseCurrency string `json:"baseCurrency"`
+			Symbol        string `json:"symbol"`
+			Name          string `json:"name"`
+			BaseCurrency  string `json:"baseCurrency"`
 			QuoteCurrency string `json:"quoteCurrency"`
-			EnableTrading bool  `json:"enableTrading"`
+			EnableTrading bool   `json:"enableTrading"`
 		} `json:"data"`
 	}
 
@@ -669,10 +668,10 @@ func (m *Manager) fetchKuCoinFuturesSymbols() ([]string, error) {
 	var contractsInfo struct {
 		Code string `json:"code"`
 		Data []struct {
-			Symbol         string `json:"symbol"`
-			Status         string `json:"status"`
-			BaseCurrency   string `json:"baseCurrency"`
-			QuoteCurrency  string `json:"quoteCurrency"`
+			Symbol        string `json:"symbol"`
+			Status        string `json:"status"`
+			BaseCurrency  string `json:"baseCurrency"`
+			QuoteCurrency string `json:"quoteCurrency"`
 		} `json:"data"`
 	}
 
@@ -711,11 +710,11 @@ func (m *Manager) fetchGateSpotSymbols() ([]string, error) {
 	}
 
 	var pairs []struct {
-		ID             string `json:"id"`
-		Base           string `json:"base"`
-		Quote          string `json:"quote"`
-		Fee            string `json:"fee"`
-		TradeStatus    string `json:"trade_status"`
+		ID          string `json:"id"`
+		Base        string `json:"base"`
+		Quote       string `json:"quote"`
+		Fee         string `json:"fee"`
+		TradeStatus string `json:"trade_status"`
 	}
 
 	if err := json.Unmarshal(body, &pairs); err != nil {
@@ -753,17 +752,17 @@ func (m *Manager) fetchGateFuturesSymbols() ([]string, error) {
 	}
 
 	var contracts []struct {
-		Name               string `json:"name"`
-		Type               string `json:"type"`
-		QuantoMultiplier   string `json:"quanto_multiplier"`
-		LeverageMin        string `json:"leverage_min"`
-		LeverageMax        string `json:"leverage_max"`
-		MaintenanceRate    string `json:"maintenance_rate"`
-		MarkType           string `json:"mark_type"`
-		MarkPrice          string `json:"mark_price"`
-		IndexPrice         string `json:"index_price"`
-		LastPrice          string `json:"last_price"`
-		InDelisting        bool   `json:"in_delisting"`
+		Name             string `json:"name"`
+		Type             string `json:"type"`
+		QuantoMultiplier string `json:"quanto_multiplier"`
+		LeverageMin      string `json:"leverage_min"`
+		LeverageMax      string `json:"leverage_max"`
+		MaintenanceRate  string `json:"maintenance_rate"`
+		MarkType         string `json:"mark_type"`
+		MarkPrice        string `json:"mark_price"`
+		IndexPrice       string `json:"index_price"`
+		LastPrice        string `json:"last_price"`
+		InDelisting      bool   `json:"in_delisting"`
 	}
 
 	if err := json.Unmarshal(body, &contracts); err != nil {

@@ -62,7 +62,7 @@ func (sfs *SymbolFilterService) SyncAllSymbols() error {
 // fetchUpbitKRWSymbols는 업비트 KRW 마켓 심볼 가져오기
 func (sfs *SymbolFilterService) fetchUpbitKRWSymbols() ([]string, error) {
 	url := "https://api.upbit.com/v1/market/all"
-	
+
 	resp, err := sfs.httpClient.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("API 호출 실패: %v", err)
@@ -79,8 +79,8 @@ func (sfs *SymbolFilterService) fetchUpbitKRWSymbols() ([]string, error) {
 	}
 
 	var markets []struct {
-		Market   string `json:"market"`
-		KoreanName string `json:"korean_name"`
+		Market      string `json:"market"`
+		KoreanName  string `json:"korean_name"`
 		EnglishName string `json:"english_name"`
 	}
 
@@ -231,8 +231,8 @@ func (sfs *SymbolFilterService) parseKuCoinSymbols(body []byte, marketType strin
 	if marketType == "spot" {
 		var response struct {
 			Data []struct {
-				Symbol    string `json:"symbol"`
-				EnableTrading bool `json:"enableTrading"`
+				Symbol        string `json:"symbol"`
+				EnableTrading bool   `json:"enableTrading"`
 			} `json:"data"`
 		}
 
@@ -313,9 +313,9 @@ func (sfs *SymbolFilterService) parsePhemexSymbols(body []byte, marketType strin
 	var response struct {
 		Data struct {
 			Products []struct {
-				Symbol      string `json:"symbol"`
-				Status      string `json:"status"`
-				Type        string `json:"type"`
+				Symbol string `json:"symbol"`
+				Status string `json:"status"`
+				Type   string `json:"type"`
 			} `json:"products"`
 		} `json:"data"`
 	}
@@ -350,8 +350,8 @@ func (sfs *SymbolFilterService) parsePhemexSymbols(body []byte, marketType strin
 func (sfs *SymbolFilterService) parseGateSymbols(body []byte, marketType string) ([]string, error) {
 	if marketType == "spot" {
 		var symbols []struct {
-			ID           string `json:"id"`
-			TradeStatus  string `json:"trade_status"`
+			ID          string `json:"id"`
+			TradeStatus string `json:"trade_status"`
 		}
 
 		if err := json.Unmarshal(body, &symbols); err != nil {
@@ -373,8 +373,8 @@ func (sfs *SymbolFilterService) parseGateSymbols(body []byte, marketType string)
 	} else {
 		// Futures
 		var response []struct {
-			Name   string `json:"name"`
-			InDelisting bool `json:"in_delisting"`
+			Name        string `json:"name"`
+			InDelisting bool   `json:"in_delisting"`
 		}
 
 		if err := json.Unmarshal(body, &response); err != nil {

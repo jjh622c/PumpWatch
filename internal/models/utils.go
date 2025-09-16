@@ -30,11 +30,11 @@ func formatFloat(f float64) string {
 func calculatePercentChange(startPrice, endPrice string) string {
 	start := parseFloat(startPrice)
 	end := parseFloat(endPrice)
-	
+
 	if start == 0 {
 		return "0.00"
 	}
-	
+
 	change := ((end - start) / start) * 100
 	return fmt.Sprintf("%.2f", change)
 }
@@ -132,10 +132,10 @@ func CleanSymbol(symbol string) string {
 // ExtractBaseQuote는 심볼에서 base와 quote asset을 추출
 func ExtractBaseQuote(symbol string) (base, quote string) {
 	symbol = CleanSymbol(symbol)
-	
+
 	// 일반적인 USDT, USDC, BTC 등의 패턴으로 분리 시도
 	quotes := []string{"USDT", "USDC", "BUSD", "BTC", "ETH", "BNB", "USD", "EUR"}
-	
+
 	for _, q := range quotes {
 		if strings.HasSuffix(symbol, q) {
 			base = symbol[:len(symbol)-len(q)]
@@ -143,12 +143,12 @@ func ExtractBaseQuote(symbol string) (base, quote string) {
 			return
 		}
 	}
-	
+
 	// 패턴 매칭 실패시 기본값 반환
 	if len(symbol) > 3 {
 		return symbol[:len(symbol)-3], symbol[len(symbol)-3:]
 	}
-	
+
 	return symbol, ""
 }
 
@@ -156,14 +156,14 @@ func ExtractBaseQuote(symbol string) (base, quote string) {
 func CalculateSpread(bid, ask string) string {
 	bidPrice := parseFloat(bid)
 	askPrice := parseFloat(ask)
-	
+
 	if bidPrice == 0 || askPrice == 0 {
 		return "0.00"
 	}
-	
+
 	spread := askPrice - bidPrice
 	spreadPercent := (spread / bidPrice) * 100
-	
+
 	return fmt.Sprintf("%.4f", spreadPercent)
 }
 
@@ -171,14 +171,14 @@ func CalculateSpread(bid, ask string) string {
 func GetMemoryUsageEstimate(tradeCount int) int64 {
 	// TradeEvent 구조체 크기 추정: ~200 bytes per trade
 	const tradeEventSize = 200
-	
+
 	// 12개 거래소 * 마켓 조합에서 각각 tradeCount만큼
 	totalTrades := tradeCount * 12
-	
+
 	// 기본 구조체 오버헤드 + 실제 데이터
 	overhead := int64(1024 * 1024) // 1MB 오버헤드
 	dataSize := int64(totalTrades * tradeEventSize)
-	
+
 	return overhead + dataSize
 }
 
@@ -189,7 +189,7 @@ func FormatMemorySize(bytes int64) string {
 		MB = KB * 1024
 		GB = MB * 1024
 	)
-	
+
 	switch {
 	case bytes >= GB:
 		return fmt.Sprintf("%.2f GB", float64(bytes)/GB)

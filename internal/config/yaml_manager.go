@@ -6,16 +6,16 @@ import (
 	"path/filepath"
 	"time"
 
-	"gopkg.in/yaml.v3"
 	"PumpWatch/internal/models"
+	"gopkg.in/yaml.v3"
 )
 
 // YAMLConfigManager는 YAML 기반 설정 관리자
 type YAMLConfigManager struct {
-	configPath     string                    // YAML 파일 경로
-	config         *models.SymbolsConfig     // 현재 설정
-	autoSaveTimer  *time.Ticker             // 자동 저장 타이머
-	lastModified   time.Time                // 파일 마지막 수정 시간
+	configPath    string                // YAML 파일 경로
+	config        *models.SymbolsConfig // 현재 설정
+	autoSaveTimer *time.Ticker          // 자동 저장 타이머
+	lastModified  time.Time             // 파일 마지막 수정 시간
 }
 
 // NewYAMLConfigManager는 새로운 YAML Config Manager 생성
@@ -60,7 +60,7 @@ func (ycm *YAMLConfigManager) LoadConfig() error {
 	}
 
 	ycm.config = config
-	fmt.Printf("📂 YAML 설정 로드 완료: %s (version %s)\n", 
+	fmt.Printf("📂 YAML 설정 로드 완료: %s (version %s)\n",
 		ycm.configPath, config.Version)
 
 	return nil
@@ -215,7 +215,7 @@ func (ycm *YAMLConfigManager) ImportConfig(importPath string) error {
 
 	ycm.config = config
 	fmt.Printf("📥 설정 가져오기 완료: %s\n", importPath)
-	
+
 	return ycm.SaveConfig()
 }
 
@@ -223,7 +223,7 @@ func (ycm *YAMLConfigManager) ImportConfig(importPath string) error {
 func (ycm *YAMLConfigManager) BackupConfig() (string, error) {
 	timestamp := time.Now().Format("20060102_150405")
 	backupPath := fmt.Sprintf("%s.backup_%s", ycm.configPath, timestamp)
-	
+
 	if err := ycm.ExportConfig(backupPath); err != nil {
 		return "", fmt.Errorf("백업 생성 실패: %v", err)
 	}
@@ -254,17 +254,17 @@ func (ycm *YAMLConfigManager) RestoreFromBackup(backupPath string) error {
 // GetConfigSummary는 설정 요약 정보 반환
 func (ycm *YAMLConfigManager) GetConfigSummary() ConfigSummary {
 	stats := ycm.config.GetStats()
-	
+
 	return ConfigSummary{
-		Version:                ycm.config.Version,
-		LastUpdated:           ycm.config.UpdatedAt,
-		FilePath:              ycm.configPath,
-		FileSize:              ycm.getFileSize(),
-		TotalExchanges:        stats.TotalExchanges,
-		TotalUpbitKRWSymbols:  stats.TotalUpbitKRWSymbols,
-		TotalSpotSymbols:      stats.TotalSpotSymbols,
-		TotalFuturesSymbols:   stats.TotalFuturesSymbols,
-		TotalSubscriptions:    stats.TotalSubscriptions,
+		Version:              ycm.config.Version,
+		LastUpdated:          ycm.config.UpdatedAt,
+		FilePath:             ycm.configPath,
+		FileSize:             ycm.getFileSize(),
+		TotalExchanges:       stats.TotalExchanges,
+		TotalUpbitKRWSymbols: stats.TotalUpbitKRWSymbols,
+		TotalSpotSymbols:     stats.TotalSpotSymbols,
+		TotalFuturesSymbols:  stats.TotalFuturesSymbols,
+		TotalSubscriptions:   stats.TotalSubscriptions,
 	}
 }
 
@@ -278,15 +278,15 @@ func (ycm *YAMLConfigManager) getFileSize() int64 {
 
 // ConfigSummary는 설정 요약 정보
 type ConfigSummary struct {
-	Version               string    `json:"version"`
-	LastUpdated           time.Time `json:"last_updated"`
-	FilePath              string    `json:"file_path"`
-	FileSize              int64     `json:"file_size"`
-	TotalExchanges        int       `json:"total_exchanges"`
-	TotalUpbitKRWSymbols  int       `json:"total_upbit_krw_symbols"`
-	TotalSpotSymbols      int       `json:"total_spot_symbols"`
-	TotalFuturesSymbols   int       `json:"total_futures_symbols"`
-	TotalSubscriptions    int       `json:"total_subscriptions"`
+	Version              string    `json:"version"`
+	LastUpdated          time.Time `json:"last_updated"`
+	FilePath             string    `json:"file_path"`
+	FileSize             int64     `json:"file_size"`
+	TotalExchanges       int       `json:"total_exchanges"`
+	TotalUpbitKRWSymbols int       `json:"total_upbit_krw_symbols"`
+	TotalSpotSymbols     int       `json:"total_spot_symbols"`
+	TotalFuturesSymbols  int       `json:"total_futures_symbols"`
+	TotalSubscriptions   int       `json:"total_subscriptions"`
 }
 
 // WriteConfigTemplate는 설정 템플릿 생성
@@ -296,14 +296,14 @@ func WriteConfigTemplate(templatePath string) error {
 
 	// 예시 데이터 추가
 	template.UpbitKRWSymbols = []string{"BTC", "ETH", "XRP", "ADA", "DOT"}
-	
+
 	// 바이낸스 예시 심볼 추가
 	if config, exists := template.Exchanges["binance"]; exists {
 		config.SpotSymbols = []string{"BTCUSDT", "ETHUSDT", "SOLUSDT"}
 		config.FuturesSymbols = []string{"BTCUSDT", "ETHUSDT", "SOLUSDT"}
 		template.Exchanges["binance"] = config
 	}
-	
+
 	// 구독 목록 생성
 	template.GenerateSubscriptionLists()
 

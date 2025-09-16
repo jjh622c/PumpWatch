@@ -63,7 +63,7 @@ exchanges:
   gate:
     enabled: true
     spot_endpoint: "wss://api.gateio.ws/ws/v4/"
-    futures_endpoint: "wss://fx-ws.gateio.ws/v4/ws"
+    futures_endpoint: "wss://fx-ws.gateio.ws/v4/ws/usdt"
     max_symbols_per_connection: 100
     retry_cooldown: "5s"
     max_retries: 10
@@ -84,13 +84,41 @@ exchanges:
 
 # Storage settings
 storage:
+  enabled: true
   data_dir: "./data"
   raw_data_enabled: true
-  analysis_enabled: true
-  cleanup_after_days: 30
+  refined_enabled: true
+  compression: false
+  retention_days: 30
+  max_file_size: "100MB"
+  backup_enabled: true
+  backup_interval: "24h"
 
 # Analysis settings
 analysis:
-  pump_threshold: 3.0  # 3% price increase threshold
-  time_window_seconds: 1
-  min_volume_ratio: 2.0
+  enabled: true                    # Enable/disable pump analysis (성능 고려시 false로 설정)
+  threshold_percent: 3.0           # 3% price increase threshold
+  time_window: "1s"                # 1-second analysis windows
+  min_volume_ratio: 2.0            # Minimum volume increase
+  max_analysis_delay: "2s"         # Delay before analysis
+
+# Collection timing settings
+collection:
+  pre_trigger_duration: "20s"    # Data collection start before listing announcement
+  collection_duration: "20s"     # Total collection duration after trigger
+  post_analysis_delay: "2s"      # Delay before running analysis
+
+# System timing settings
+system:
+  shutdown_timeout: "30s"        # Graceful shutdown timeout
+  status_report_interval: "60s"  # System status reporting interval
+  auto_save_interval: "5m"       # Auto-save configuration interval
+  pool_startup_delay: "500ms"    # Delay between worker pool startups
+
+# Connection timing settings (fallbacks for exchanges without specific config)
+connection:
+  default_ping_interval: "25s"
+  default_connection_timeout: "30s"
+  default_retry_delay: "1s"
+  batch_processing_delay: "500ms"  # Delay between subscription batches
+  api_rate_limit_delay: "100ms"    # General API rate limiting delay

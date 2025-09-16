@@ -5,15 +5,15 @@ import "strings"
 // TradeEvent는 모든 거래소의 체결 데이터를 통합한 표준 모델
 type TradeEvent struct {
 	// 메타데이터
-	Exchange    string `json:"exchange"`     // "binance", "okx", "kucoin", "phemex", "gate", "bybit"
-	MarketType  string `json:"market_type"`  // "spot" | "futures"
-	Symbol      string `json:"symbol"`       // "BTCUSDT", "BTC-USDT" 등
+	Exchange   string `json:"exchange"`    // "binance", "okx", "kucoin", "phemex", "gate", "bybit"
+	MarketType string `json:"market_type"` // "spot" | "futures"
+	Symbol     string `json:"symbol"`      // "BTCUSDT", "BTC-USDT" 등
 
 	// 거래 데이터
-	TradeID  string `json:"trade_id"`  // 거래소별 고유 ID
-	Price    string `json:"price"`     // "50000.00" (string으로 정밀도 유지)
-	Quantity string `json:"quantity"`  // "0.1" (string으로 정밀도 유지)
-	Side     string `json:"side"`      // "buy" | "sell"
+	TradeID  string `json:"trade_id"` // 거래소별 고유 ID
+	Price    string `json:"price"`    // "50000.00" (string으로 정밀도 유지)
+	Quantity string `json:"quantity"` // "0.1" (string으로 정밀도 유지)
+	Side     string `json:"side"`     // "buy" | "sell"
 
 	// 타임스탬프 (모두 Unix milliseconds)
 	Timestamp   int64 `json:"timestamp"`    // 거래 발생 시간
@@ -57,7 +57,7 @@ func (te *TradeEvent) SetTriggerTime(triggerTime int64) {
 func (te *TradeEvent) Normalize() {
 	// Symbol 표준화 (모든 거래소에서 BTCUSDT 형식으로)
 	te.Symbol = normalizeSymbol(te.Exchange, te.Symbol)
-	
+
 	// Side 표준화 (모든 거래소에서 "buy"/"sell"로)
 	te.Side = normalizeSide(te.Exchange, te.Side)
 }
@@ -69,7 +69,7 @@ func normalizeSymbol(exchange, symbol string) string {
 		// BTC-USDT -> BTCUSDT
 		return normalizeOKXSymbol(symbol)
 	case "kucoin":
-		// BTC-USDT -> BTCUSDT  
+		// BTC-USDT -> BTCUSDT
 		return normalizeKuCoinSymbol(symbol)
 	case "phemex":
 		// sBTCUSDT -> BTCUSDT (spot)

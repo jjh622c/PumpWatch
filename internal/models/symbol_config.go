@@ -10,13 +10,13 @@ import (
 type SymbolsConfig struct {
 	Version   string    `yaml:"version"`
 	UpdatedAt time.Time `yaml:"updated_at"`
-	
+
 	// 업비트 KRW 상장 심볼들
 	UpbitKRWSymbols []string `yaml:"upbit_krw_symbols"`
-	
+
 	// 거래소별 설정
 	Exchanges map[string]ExchangeConfig `yaml:"exchanges"`
-	
+
 	// 실제 구독할 심볼 목록 (업비트 KRW 제외 후)
 	SubscriptionLists map[string][]string `yaml:"subscription_lists"`
 }
@@ -26,16 +26,16 @@ type ExchangeConfig struct {
 	// WebSocket Endpoints
 	SpotEndpoint    string `yaml:"spot_endpoint"`
 	FuturesEndpoint string `yaml:"futures_endpoint"`
-	
+
 	// 연결 제한 설정
 	MaxSymbolsPerConnection int           `yaml:"max_symbols_per_connection"`
-	RetryCooldown          time.Duration `yaml:"retry_cooldown"`
-	MaxRetries             int           `yaml:"max_retries"`
-	
+	RetryCooldown           time.Duration `yaml:"retry_cooldown"`
+	MaxRetries              int           `yaml:"max_retries"`
+
 	// 심볼 목록
 	SpotSymbols    []string `yaml:"spot_symbols"`
 	FuturesSymbols []string `yaml:"futures_symbols"`
-	
+
 	// 메타데이터
 	LastUpdated time.Time `yaml:"last_updated"`
 }
@@ -46,43 +46,43 @@ var DefaultExchangeConfigs = map[string]ExchangeConfig{
 		SpotEndpoint:            "wss://stream.binance.com:9443/ws",
 		FuturesEndpoint:         "wss://fstream.binance.com/ws",
 		MaxSymbolsPerConnection: 100,
-		RetryCooldown:          30 * time.Second,
-		MaxRetries:             5,
+		RetryCooldown:           30 * time.Second,
+		MaxRetries:              5,
 	},
 	"bybit": {
 		SpotEndpoint:            "wss://stream.bybit.com/v5/public/spot",
 		FuturesEndpoint:         "wss://stream.bybit.com/v5/public/linear",
 		MaxSymbolsPerConnection: 50,
-		RetryCooldown:          60 * time.Second,
-		MaxRetries:             3,
+		RetryCooldown:           60 * time.Second,
+		MaxRetries:              3,
 	},
 	"kucoin": {
 		SpotEndpoint:            "wss://ws-api.kucoin.com/endpoint", // 실제로는 토큰 기반
 		FuturesEndpoint:         "wss://ws-api-futures.kucoin.com/endpoint",
 		MaxSymbolsPerConnection: 100,
-		RetryCooldown:          45 * time.Second,
-		MaxRetries:             4,
+		RetryCooldown:           45 * time.Second,
+		MaxRetries:              4,
 	},
 	"okx": {
 		SpotEndpoint:            "wss://ws.okx.com:8443/ws/v5/public",
 		FuturesEndpoint:         "wss://ws.okx.com:8443/ws/v5/public",
 		MaxSymbolsPerConnection: 100,
-		RetryCooldown:          30 * time.Second,
-		MaxRetries:             5,
+		RetryCooldown:           30 * time.Second,
+		MaxRetries:              5,
 	},
 	"phemex": {
 		SpotEndpoint:            "wss://phemex.com/ws",
 		FuturesEndpoint:         "wss://phemex.com/ws",
 		MaxSymbolsPerConnection: 20,
-		RetryCooldown:          90 * time.Second,
-		MaxRetries:             3,
+		RetryCooldown:           90 * time.Second,
+		MaxRetries:              3,
 	},
 	"gate": {
 		SpotEndpoint:            "wss://api.gateio.ws/ws/v4/",
 		FuturesEndpoint:         "wss://fx-ws.gateio.ws/v4/ws",
 		MaxSymbolsPerConnection: 100,
-		RetryCooldown:          30 * time.Second,
-		MaxRetries:             5,
+		RetryCooldown:           30 * time.Second,
+		MaxRetries:              5,
 	},
 }
 
@@ -105,7 +105,7 @@ func (sc *SymbolsConfig) InitializeWithDefaults() {
 		config.LastUpdated = time.Now()
 		sc.Exchanges[exchange] = config
 	}
-	
+
 	// 기본 구독 목록 초기화
 	for exchange := range DefaultExchangeConfigs {
 		sc.SubscriptionLists[exchange+"_spot"] = make([]string, 0)
@@ -136,7 +136,7 @@ func (sc *SymbolsConfig) GenerateSubscriptionLists() {
 	for _, symbol := range sc.UpbitKRWSymbols {
 		upbitSet[symbol] = true
 	}
-	
+
 	for exchange, config := range sc.Exchanges {
 		// Spot 구독 목록 생성
 		spotList := make([]string, 0)
@@ -147,7 +147,7 @@ func (sc *SymbolsConfig) GenerateSubscriptionLists() {
 			}
 		}
 		sc.SubscriptionLists[exchange+"_spot"] = spotList
-		
+
 		// Futures 구독 목록 생성
 		futuresList := make([]string, 0)
 		for _, symbol := range config.FuturesSymbols {
@@ -158,7 +158,7 @@ func (sc *SymbolsConfig) GenerateSubscriptionLists() {
 		}
 		sc.SubscriptionLists[exchange+"_futures"] = futuresList
 	}
-	
+
 	sc.UpdatedAt = time.Now()
 }
 
@@ -191,25 +191,25 @@ func (sc *SymbolsConfig) Validate() error {
 	if sc.Version == "" {
 		return fmt.Errorf("version is required")
 	}
-	
+
 	if len(sc.Exchanges) == 0 {
 		return fmt.Errorf("at least one exchange is required")
 	}
-	
+
 	for exchange, config := range sc.Exchanges {
 		if config.SpotEndpoint == "" && config.FuturesEndpoint == "" {
 			return fmt.Errorf("exchange %s must have at least one endpoint", exchange)
 		}
-		
+
 		if config.MaxSymbolsPerConnection <= 0 {
 			return fmt.Errorf("exchange %s must have positive max_symbols_per_connection", exchange)
 		}
-		
+
 		if config.MaxRetries <= 0 {
 			return fmt.Errorf("exchange %s must have positive max_retries", exchange)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -218,16 +218,16 @@ func (sc *SymbolsConfig) GetStats() SymbolConfigStats {
 	totalSpotSymbols := 0
 	totalFuturesSymbols := 0
 	totalSubscriptions := 0
-	
+
 	for _, config := range sc.Exchanges {
 		totalSpotSymbols += len(config.SpotSymbols)
 		totalFuturesSymbols += len(config.FuturesSymbols)
 	}
-	
+
 	for _, list := range sc.SubscriptionLists {
 		totalSubscriptions += len(list)
 	}
-	
+
 	return SymbolConfigStats{
 		TotalExchanges:       len(sc.Exchanges),
 		TotalUpbitKRWSymbols: len(sc.UpbitKRWSymbols),
@@ -250,17 +250,17 @@ type SymbolConfigStats struct {
 
 // SymbolFilterManager는 심볼 필터링 관리자
 type SymbolFilterManager struct {
-	config      *SymbolsConfig
-	upbitAPI    string // 업비트 API URL
+	config       *SymbolsConfig
+	upbitAPI     string                       // 업비트 API URL
 	exchangeAPIs map[string]ExchangeAPIConfig // 거래소별 API 설정
-	lastSync    time.Time
+	lastSync     time.Time
 }
 
 // ExchangeAPIConfig는 거래소별 API 설정
 type ExchangeAPIConfig struct {
 	SpotSymbolsAPI    string        // Spot 심볼 목록 API
 	FuturesSymbolsAPI string        // Futures 심볼 목록 API
-	RateLimit        time.Duration // API 호출 제한
+	RateLimit         time.Duration // API 호출 제한
 }
 
 // DefaultExchangeAPIConfigs는 기본 거래소 API 설정
@@ -268,32 +268,32 @@ var DefaultExchangeAPIConfigs = map[string]ExchangeAPIConfig{
 	"binance": {
 		SpotSymbolsAPI:    "https://api.binance.com/api/v3/exchangeInfo",
 		FuturesSymbolsAPI: "https://fapi.binance.com/fapi/v1/exchangeInfo",
-		RateLimit:        1 * time.Second,
+		RateLimit:         1 * time.Second,
 	},
 	"bybit": {
 		SpotSymbolsAPI:    "https://api.bybit.com/v5/market/instruments-info?category=spot",
 		FuturesSymbolsAPI: "https://api.bybit.com/v5/market/instruments-info?category=linear",
-		RateLimit:        1 * time.Second,
+		RateLimit:         1 * time.Second,
 	},
 	"kucoin": {
 		SpotSymbolsAPI:    "https://api.kucoin.com/api/v1/symbols",
 		FuturesSymbolsAPI: "https://api-futures.kucoin.com/api/v1/contracts/active",
-		RateLimit:        1 * time.Second,
+		RateLimit:         1 * time.Second,
 	},
 	"okx": {
 		SpotSymbolsAPI:    "https://www.okx.com/api/v5/public/instruments?instType=SPOT",
 		FuturesSymbolsAPI: "https://www.okx.com/api/v5/public/instruments?instType=FUTURES",
-		RateLimit:        1 * time.Second,
+		RateLimit:         1 * time.Second,
 	},
 	"phemex": {
 		SpotSymbolsAPI:    "https://api.phemex.com/exchange/public/cfg/v2/products",
 		FuturesSymbolsAPI: "https://api.phemex.com/exchange/public/cfg/v2/products",
-		RateLimit:        2 * time.Second,
+		RateLimit:         2 * time.Second,
 	},
 	"gate": {
 		SpotSymbolsAPI:    "https://api.gateio.ws/api/v4/spot/currency_pairs",
 		FuturesSymbolsAPI: "https://api.gateio.ws/api/v4/futures/usdt/contracts",
-		RateLimit:        1 * time.Second,
+		RateLimit:         1 * time.Second,
 	},
 }
 
@@ -331,22 +331,22 @@ func (sfm *SymbolFilterManager) UpdateConfig(config *SymbolsConfig) {
 func extractBaseSymbol(symbol string) string {
 	// 간단한 패턴 매칭으로 기본 심볼 추출
 	// 실제로는 더 정교한 로직이 필요할 수 있음
-	
+
 	// USDT 페어인 경우
 	if strings.HasSuffix(symbol, "USDT") {
 		return strings.TrimSuffix(symbol, "USDT")
 	}
-	
-	// BTC 페어인 경우  
+
+	// BTC 페어인 경우
 	if strings.HasSuffix(symbol, "BTC") {
 		return strings.TrimSuffix(symbol, "BTC")
 	}
-	
+
 	// ETH 페어인 경우
 	if strings.HasSuffix(symbol, "ETH") {
 		return strings.TrimSuffix(symbol, "ETH")
 	}
-	
+
 	// 기본적으로 원본 반환
 	return symbol
 }

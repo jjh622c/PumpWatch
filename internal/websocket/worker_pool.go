@@ -14,60 +14,60 @@ import (
 
 // WorkerPool manages multiple WebSocket workers per exchange based on connection limits
 type WorkerPool struct {
-	Exchange           string
-	MarketType         string
-	Symbols            []string
-	Workers            []*Worker
-	MaxSymbolsPerConn  int
-	MaxConnections     int
-	PingInterval       time.Duration
-	ConnectionTimeout  time.Duration
-	RateLimit          int // requests per second/minute
+	Exchange          string
+	MarketType        string
+	Symbols           []string
+	Workers           []*Worker
+	MaxSymbolsPerConn int
+	MaxConnections    int
+	PingInterval      time.Duration
+	ConnectionTimeout time.Duration
+	RateLimit         int // requests per second/minute
 
 	// Connection management
-	mu                 sync.RWMutex
-	ctx                context.Context
-	cancel             context.CancelFunc
-	logger             *logging.Logger
+	mu     sync.RWMutex
+	ctx    context.Context
+	cancel context.CancelFunc
+	logger *logging.Logger
 
 	// Statistics
-	TotalWorkers       int
-	ActiveWorkers      int
-	TotalMessages      int64
-	LastActivity       time.Time
+	TotalWorkers  int
+	ActiveWorkers int
+	TotalMessages int64
+	LastActivity  time.Time
 
 	// Callbacks
-	OnTradeEvent       func(models.TradeEvent)
-	OnError            func(error)
-	OnWorkerConnected  func(workerID int)
+	OnTradeEvent         func(models.TradeEvent)
+	OnError              func(error)
+	OnWorkerConnected    func(workerID int)
 	OnWorkerDisconnected func(workerID int)
 }
 
 // Worker represents a single WebSocket connection worker
 type Worker struct {
-	ID                 int
-	Exchange           string
-	MarketType         string
-	Symbols            []string
-	Connector          connectors.WebSocketConnector
-	Status             WorkerStatus
-	LastMessageTime    time.Time
-	MessageCount       int64
-	ReconnectCount     int
+	ID              int
+	Exchange        string
+	MarketType      string
+	Symbols         []string
+	Connector       connectors.WebSocketConnector
+	Status          WorkerStatus
+	LastMessageTime time.Time
+	MessageCount    int64
+	ReconnectCount  int
 
-	ctx                context.Context
-	cancel             context.CancelFunc
-	mu                 sync.RWMutex
-	logger             *logging.Logger
+	ctx    context.Context
+	cancel context.CancelFunc
+	mu     sync.RWMutex
+	logger *logging.Logger
 
 	// Rate limiting
-	rateLimiter        *RateLimiter
+	rateLimiter *RateLimiter
 
 	// Callbacks
-	OnTradeEvent       func(models.TradeEvent)
-	OnError            func(error)
-	OnConnected        func()
-	OnDisconnected     func()
+	OnTradeEvent   func(models.TradeEvent)
+	OnError        func(error)
+	OnConnected    func()
+	OnDisconnected func()
 }
 
 // WorkerStatus represents the status of a worker
@@ -146,11 +146,21 @@ func (rl *RateLimiter) Allow() bool {
 }
 
 // NewWorkerPool creates a new worker pool based on exchange limitations
-func NewWorkerPool(ctx context.Context, exchange, marketType string, symbols []string) (*WorkerPool, error) {
+func NewWorkerPool(ctx context.Context, exchange, marketType string, symbols []string, exchangeConfig ...interface{}) (*WorkerPool, error) {
 	poolCtx, cancel := context.WithCancel(ctx)
 
 	// Get exchange-specific configuration
-	config := getExchangeWorkerConfig(exchange)
+	var config ExchangeWorkerConfig
+	if len(exchangeConfig) > 0 {
+		// Use provided config (from config.yaml)
+		if cfg, ok := exchangeConfig[0].(ExchangeWorkerConfig); ok {
+			config = cfg
+		} else {
+			config = getExchangeWorkerConfig(exchange) // fallback
+		}
+	} else {
+		config = getExchangeWorkerConfig(exchange) // fallback
+	}
 
 	pool := &WorkerPool{
 		Exchange:          exchange,
@@ -160,11 +170,11 @@ func NewWorkerPool(ctx context.Context, exchange, marketType string, symbols []s
 		MaxConnections:    config.MaxConnections,
 		PingInterval:      config.PingInterval,
 		ConnectionTimeout: config.ConnectionTimeout,
-		RateLimit:        config.RateLimit,
-		ctx:              poolCtx,
-		cancel:           cancel,
-		logger:           logging.GetGlobalLogger(),
-		LastActivity:     time.Now(),
+		RateLimit:         config.RateLimit,
+		ctx:               poolCtx,
+		cancel:            cancel,
+		logger:            logging.GetGlobalLogger(),
+		LastActivity:      time.Now(),
 	}
 
 	// Calculate number of workers needed
@@ -197,10 +207,10 @@ func NewWorkerPool(ctx context.Context, exchange, marketType string, symbols []s
 type ExchangeWorkerConfig struct {
 	MaxSymbolsPerConnection int
 	MaxConnections          int
-	PingInterval           time.Duration
-	ConnectionTimeout      time.Duration
-	RateLimit             int // requests per interval
-	RateLimitInterval     time.Duration
+	PingInterval            time.Duration
+	ConnectionTimeout       time.Duration
+	RateLimit               int // requests per interval
+	RateLimitInterval       time.Duration
 }
 
 // getExchangeWorkerConfig returns exchange-specific worker configuration
@@ -210,65 +220,65 @@ func getExchangeWorkerConfig(exchange string) ExchangeWorkerConfig {
 		return ExchangeWorkerConfig{
 			MaxSymbolsPerConnection: 1000, // Conservative limit from 1,024 max
 			MaxConnections:          10,   // Conservative from API limits
-			PingInterval:           20 * time.Second,
-			ConnectionTimeout:      45 * time.Second,
-			RateLimit:             5,     // 5 messages per second
-			RateLimitInterval:     1 * time.Second,
+			PingInterval:            20 * time.Second,
+			ConnectionTimeout:       45 * time.Second,
+			RateLimit:               5, // 5 messages per second
+			RateLimitInterval:       1 * time.Second,
 		}
 	case "bybit":
 		return ExchangeWorkerConfig{
-			MaxSymbolsPerConnection: 200,  // Conservative estimate
-			MaxConnections:          50,   // Based on 500 connections per 5min
-			PingInterval:           20 * time.Second,
-			ConnectionTimeout:      60 * time.Second,
-			RateLimit:             10,    // Conservative estimate
-			RateLimitInterval:     1 * time.Second,
+			MaxSymbolsPerConnection: 200, // Conservative estimate
+			MaxConnections:          50,  // Based on 500 connections per 5min
+			PingInterval:            20 * time.Second,
+			ConnectionTimeout:       60 * time.Second,
+			RateLimit:               10, // Conservative estimate
+			RateLimitInterval:       1 * time.Second,
 		}
 	case "okx":
 		return ExchangeWorkerConfig{
-			MaxSymbolsPerConnection: 100,  // Conservative from 480 requests/hour
-			MaxConnections:          20,   // Conservative estimate
-			PingInterval:           30 * time.Second,
-			ConnectionTimeout:      30 * time.Second,
-			RateLimit:             8,     // 480 per hour = ~8 per minute
-			RateLimitInterval:     1 * time.Minute,
+			MaxSymbolsPerConnection: 100, // Conservative from 480 requests/hour
+			MaxConnections:          20,  // Conservative estimate
+			PingInterval:            30 * time.Second,
+			ConnectionTimeout:       30 * time.Second,
+			RateLimit:               8, // 480 per hour = ~8 per minute
+			RateLimitInterval:       1 * time.Minute,
 		}
 	case "kucoin":
 		return ExchangeWorkerConfig{
-			MaxSymbolsPerConnection: 400,  // Conservative from 500 max topics
-			MaxConnections:          40,   // Conservative from 50 max connections
-			PingInterval:           30 * time.Second,
-			ConnectionTimeout:      60 * time.Second,
-			RateLimit:             10,    // 100 per 10 seconds = 10 per second
-			RateLimitInterval:     1 * time.Second,
+			MaxSymbolsPerConnection: 400, // Conservative from 500 max topics
+			MaxConnections:          40,  // Conservative from 50 max connections
+			PingInterval:            30 * time.Second,
+			ConnectionTimeout:       60 * time.Second,
+			RateLimit:               10, // 100 per 10 seconds = 10 per second
+			RateLimitInterval:       1 * time.Second,
 		}
 	case "phemex":
 		return ExchangeWorkerConfig{
-			MaxSymbolsPerConnection: 100,  // Conservative estimate
-			MaxConnections:          20,   // Conservative estimate
-			PingInterval:           30 * time.Second,
-			ConnectionTimeout:      60 * time.Second,
-			RateLimit:             5,     // Conservative estimate
-			RateLimitInterval:     1 * time.Second,
+			MaxSymbolsPerConnection: 100, // Conservative estimate
+			MaxConnections:          20,  // Conservative estimate
+			PingInterval:            30 * time.Second,
+			ConnectionTimeout:       60 * time.Second,
+			RateLimit:               5, // Conservative estimate
+			RateLimitInterval:       1 * time.Second,
 		}
 	case "gate":
 		return ExchangeWorkerConfig{
-			MaxSymbolsPerConnection: 50,   // Conservative from 50 requests/sec limit
-			MaxConnections:          10,   // Conservative estimate
-			PingInterval:           10 * time.Second, // 5-10 seconds recommended
-			ConnectionTimeout:      60 * time.Second,
-			RateLimit:             50,    // 50 requests per second per channel
-			RateLimitInterval:     1 * time.Second,
+			MaxSymbolsPerConnection: 50,               // Conservative from 50 requests/sec limit
+			MaxConnections:          10,               // Conservative estimate
+			PingInterval:            10 * time.Second, // 5-10 seconds recommended
+			ConnectionTimeout:       60 * time.Second,
+			RateLimit:               50, // 50 requests per second per channel
+			RateLimitInterval:       1 * time.Second,
 		}
 	default:
 		// Default conservative configuration
 		return ExchangeWorkerConfig{
 			MaxSymbolsPerConnection: 100,
 			MaxConnections:          10,
-			PingInterval:           30 * time.Second,
-			ConnectionTimeout:      60 * time.Second,
-			RateLimit:             5,
-			RateLimitInterval:     1 * time.Second,
+			PingInterval:            30 * time.Second,
+			ConnectionTimeout:       60 * time.Second,
+			RateLimit:               5,
+			RateLimitInterval:       1 * time.Second,
 		}
 	}
 }
@@ -392,24 +402,24 @@ func (wp *WorkerPool) GetStats() map[string]interface{} {
 		worker.mu.RLock()
 		totalMessages += worker.MessageCount
 		workerStats[fmt.Sprintf("worker_%d", worker.ID)] = map[string]interface{}{
-			"status":        worker.Status.String(),
-			"symbols":       len(worker.Symbols),
-			"messages":      worker.MessageCount,
-			"reconnects":    worker.ReconnectCount,
+			"status":       worker.Status.String(),
+			"symbols":      len(worker.Symbols),
+			"messages":     worker.MessageCount,
+			"reconnects":   worker.ReconnectCount,
 			"last_message": worker.LastMessageTime,
 		}
 		worker.mu.RUnlock()
 	}
 
 	return map[string]interface{}{
-		"exchange":        wp.Exchange,
-		"market_type":     wp.MarketType,
-		"total_workers":   wp.TotalWorkers,
-		"active_workers":  wp.ActiveWorkers,
-		"total_symbols":   len(wp.Symbols),
-		"total_messages":  totalMessages,
-		"last_activity":   wp.LastActivity,
-		"worker_details":  workerStats,
+		"exchange":       wp.Exchange,
+		"market_type":    wp.MarketType,
+		"total_workers":  wp.TotalWorkers,
+		"active_workers": wp.ActiveWorkers,
+		"total_symbols":  len(wp.Symbols),
+		"total_messages": totalMessages,
+		"last_activity":  wp.LastActivity,
+		"worker_details": workerStats,
 	}
 }
 

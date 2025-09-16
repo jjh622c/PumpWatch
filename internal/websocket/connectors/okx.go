@@ -18,8 +18,14 @@ type OKXConnector struct {
 
 // NewOKXConnector는 새로운 OKX Connector 생성
 func NewOKXConnector(marketType string, maxSymbols int) WebSocketConnector {
+	// 하드코딩된 엔드포인트 (하위 호환성을 위해 유지)
 	endpoint := "wss://ws.okx.com:8443/ws/v5/public"
-	
+	return NewOKXConnectorWithEndpoint(marketType, maxSymbols, endpoint)
+}
+
+// NewOKXConnectorWithEndpoint는 엔드포인트를 지정하여 Connector 생성
+func NewOKXConnectorWithEndpoint(marketType string, maxSymbols int, endpoint string) WebSocketConnector {
+
 	return &OKXConnector{
 		BaseConnector: BaseConnector{
 			Exchange:   "okx",
@@ -35,16 +41,16 @@ func (oc *OKXConnector) Connect(ctx context.Context, symbols []string) error {
 	if err := oc.connectWebSocket(oc.Endpoint); err != nil {
 		return fmt.Errorf("OKX 연결 실패: %v", err)
 	}
-	
+
 	oc.startPingLoop(ctx, 35*time.Second)
-	
+
 	if len(symbols) > 0 {
 		if err := oc.Subscribe(symbols); err != nil {
 			oc.Disconnect()
 			return fmt.Errorf("구독 실패: %v", err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -53,12 +59,12 @@ func (oc *OKXConnector) Subscribe(symbols []string) error {
 	if !oc.IsConnected() {
 		return fmt.Errorf("연결되지 않음")
 	}
-	
+
 	if len(oc.SubscribedSymbols)+len(symbols) > oc.MaxSymbols {
-		return fmt.Errorf("최대 구독 개수 초과: %d/%d", 
+		return fmt.Errorf("최대 구독 개수 초과: %d/%d",
 			len(oc.SubscribedSymbols)+len(symbols), oc.MaxSymbols)
 	}
-	
+
 	var args []map[string]string
 	for _, symbol := range symbols {
 		formattedSymbol := formatSymbol(symbol, "okx", oc.MarketType)
@@ -67,16 +73,16 @@ func (oc *OKXConnector) Subscribe(symbols []string) error {
 			"instId":  formattedSymbol,
 		})
 	}
-	
+
 	subMessage := map[string]interface{}{
 		"op":   "subscribe",
 		"args": args,
 	}
-	
+
 	if err := oc.sendMessage(subMessage); err != nil {
 		return fmt.Errorf("구독 메시지 전송 실패: %v", err)
 	}
-	
+
 	oc.SubscribedSymbols = append(oc.SubscribedSymbols, symbols...)
 	fmt.Printf("📊 OKX %s 구독: %d개 심볼\n", oc.MarketType, len(symbols))
 	return nil
@@ -92,14 +98,14 @@ func (oc *OKXConnector) Unsubscribe(symbols []string) error {
 			"instId":  formattedSymbol,
 		})
 	}
-	
+
 	unsubMessage := map[string]interface{}{
 		"op":   "unsubscribe",
 		"args": args,
 	}
-	
+
 	oc.sendMessage(unsubMessage)
-	
+
 	// 구독 목록에서 제거
 	for _, symbol := range symbols {
 		for i, subscribed := range oc.SubscribedSymbols {
@@ -109,7 +115,7 @@ func (oc *OKXConnector) Unsubscribe(symbols []string) error {
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -125,7 +131,7 @@ func (oc *OKXConnector) StartMessageLoop(ctx context.Context, messageChan chan<-
 					time.Sleep(1 * time.Second)
 					continue
 				}
-				
+
 				message, err := oc.readMessage()
 				if err != nil {
 					if oc.OnError != nil {
@@ -133,7 +139,7 @@ func (oc *OKXConnector) StartMessageLoop(ctx context.Context, messageChan chan<-
 					}
 					continue
 				}
-				
+
 				tradeEvents, err := oc.parseTradeMessage(message)
 				if err != nil {
 					// 파싱 실패 로그 출력 (디버깅용)
@@ -147,7 +153,7 @@ func (oc *OKXConnector) StartMessageLoop(ctx context.Context, messageChan chan<-
 					}
 					continue
 				}
-				
+
 				for _, tradeEvent := range tradeEvents {
 					select {
 					case messageChan <- tradeEvent:
@@ -175,25 +181,25 @@ func (oc *OKXConnector) parseTradeMessage(data []byte) ([]models.TradeEvent, err
 		Data []struct {
 			InstId  string `json:"instId"`
 			TradeId string `json:"tradeId"`
-			Px      string `json:"px"`      // 가격
-			Sz      string `json:"sz"`      // 수량
-			Side    string `json:"side"`    // 거래 방향
-			Ts      string `json:"ts"`      // 타임스탬프
+			Px      string `json:"px"`   // 가격
+			Sz      string `json:"sz"`   // 수량
+			Side    string `json:"side"` // 거래 방향
+			Ts      string `json:"ts"`   // 타임스탬프
 		} `json:"data"`
 	}
-	
+
 	if err := json.Unmarshal(data, &response); err != nil {
 		return nil, fmt.Errorf("JSON 파싱 실패: %v", err)
 	}
-	
+
 	if response.Arg.Channel != "trades" {
 		return nil, fmt.Errorf("거래 채널 아님")
 	}
-	
+
 	var tradeEvents []models.TradeEvent
 	for _, trade := range response.Data {
 		timestamp, _ := strconv.ParseInt(trade.Ts, 10, 64)
-		
+
 		tradeEvent := models.TradeEvent{
 			Exchange:   "okx",
 			MarketType: oc.MarketType,
@@ -206,14 +212,7 @@ func (oc *OKXConnector) parseTradeMessage(data []byte) ([]models.TradeEvent, err
 		}
 		tradeEvents = append(tradeEvents, tradeEvent)
 	}
-	
+
 	return tradeEvents, nil
 }
 
-func NewOKXSpotConnector(maxSymbols int) WebSocketConnector {
-	return NewOKXConnector("spot", maxSymbols)
-}
-
-func NewOKXFuturesConnector(maxSymbols int) WebSocketConnector {
-	return NewOKXConnector("futures", maxSymbols)
-}

@@ -1,0 +1,10 @@
+{
+  "test_symbol": "SOMI",
+  "test_success": true,
+  "test_duration": "2m0.674230585s",
+  "workers_active": 56,
+  "total_trades": 274075,
+  "data_collected": true,
+  "files_created": 1,
+  "storage_errors": 0
+}

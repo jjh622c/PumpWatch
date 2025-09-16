@@ -13,16 +13,16 @@ import (
 // SymbolCoordinator는 심볼 관리의 중앙 조정자
 // YAML 설정과 심볼 필터링을 통합 관리
 type SymbolCoordinator struct {
-	yamlManager    *config.YAMLConfigManager
-	filterService  *SymbolFilterService
-	updateTimer    *time.Ticker
-	configPath     string
-	isRunning      bool
-	
+	yamlManager   *config.YAMLConfigManager
+	filterService *SymbolFilterService
+	updateTimer   *time.Ticker
+	configPath    string
+	isRunning     bool
+
 	// 콜백 함수들
-	onUpdate       func(*models.SymbolsConfig)     // 설정 업데이트 콜백
-	onError        func(error)                     // 에러 발생 콜백
-	onSyncComplete func(models.SymbolConfigStats)  // 동기화 완료 콜백
+	onUpdate       func(*models.SymbolsConfig)    // 설정 업데이트 콜백
+	onError        func(error)                    // 에러 발생 콜백
+	onSyncComplete func(models.SymbolConfigStats) // 동기화 완료 콜백
 }
 
 // NewSymbolCoordinator는 새로운 Symbol Coordinator 생성
@@ -34,11 +34,11 @@ func NewSymbolCoordinator(configPath string) *SymbolCoordinator {
 	}
 
 	yamlManager := config.NewYAMLConfigManager(absConfigPath)
-	
+
 	return &SymbolCoordinator{
-		yamlManager:   yamlManager,
-		configPath:    absConfigPath,
-		isRunning:     false,
+		yamlManager: yamlManager,
+		configPath:  absConfigPath,
+		isRunning:   false,
 	}
 }
 
@@ -49,11 +49,11 @@ func (sc *SymbolCoordinator) Initialize() error {
 	// 1. YAML 설정 로드
 	if err := sc.yamlManager.LoadConfig(); err != nil {
 		log.Printf("⚠️ YAML 설정 로드 실패, 기본 설정 사용: %v", err)
-		
+
 		// 기본 설정으로 초기화 후 저장
 		config := models.NewSymbolsConfig()
 		config.InitializeWithDefaults()
-		
+
 		if err := sc.yamlManager.UpdateConfig(config); err != nil {
 			return fmt.Errorf("기본 설정 저장 실패: %v", err)
 		}
@@ -140,7 +140,7 @@ func (sc *SymbolCoordinator) SyncNow() error {
 
 	syncDuration := time.Since(startTime)
 	stats := sc.filterService.GetStats()
-	
+
 	log.Printf("✅ 심볼 동기화 완료 (소요시간: %.2f초)", syncDuration.Seconds())
 	log.Printf("📊 동기화 결과 - 거래소: %d개, 구독: %d개, 업비트 KRW: %d개",
 		stats.TotalExchanges, stats.TotalSubscriptions, stats.TotalUpbitKRWSymbols)
@@ -160,7 +160,7 @@ func (sc *SymbolCoordinator) SyncNow() error {
 func (sc *SymbolCoordinator) autoSyncLoop() {
 	for range sc.updateTimer.C {
 		log.Printf("⏰ 자동 동기화 트리거됨")
-		
+
 		if err := sc.SyncNow(); err != nil {
 			log.Printf("❌ 자동 동기화 실패: %v", err)
 			if sc.onError != nil {
@@ -209,7 +209,7 @@ func (sc *SymbolCoordinator) RestoreFromBackup(backupPath string) error {
 
 	// 복원 후 필터 서비스 업데이트
 	sc.filterService = NewSymbolFilterService(sc.yamlManager.GetConfig())
-	
+
 	// 콜백 호출
 	if sc.onUpdate != nil {
 		sc.onUpdate(sc.filterService.GetConfig())
@@ -231,7 +231,7 @@ func (sc *SymbolCoordinator) ImportConfig(importPath string) error {
 
 	// 가져오기 후 필터 서비스 업데이트
 	sc.filterService = NewSymbolFilterService(sc.yamlManager.GetConfig())
-	
+
 	// 콜백 호출
 	if sc.onUpdate != nil {
 		sc.onUpdate(sc.filterService.GetConfig())
@@ -281,7 +281,7 @@ func (sc *SymbolCoordinator) GetExchangeSymbols(exchange string) (spot, futures 
 	if !exists {
 		return []string{}, []string{}
 	}
-	
+
 	return exchangeConfig.SpotSymbols, exchangeConfig.FuturesSymbols
 }
 
@@ -299,16 +299,16 @@ func (sc *SymbolCoordinator) ValidateConfig() error {
 func (sc *SymbolCoordinator) GetHealthStatus() CoordinatorHealthStatus {
 	stats := sc.GetStats()
 	summary := sc.GetConfigSummary()
-	
+
 	return CoordinatorHealthStatus{
-		IsRunning:            sc.isRunning,
-		LastUpdate:           summary.LastUpdated,
-		ConfigPath:           sc.configPath,
-		TotalExchanges:       stats.TotalExchanges,
-		TotalSubscriptions:   stats.TotalSubscriptions,
-		ConfigFileSize:       summary.FileSize,
-		HasActiveTimer:       sc.updateTimer != nil,
-		NextSyncTime:         sc.getNextSyncTime(),
+		IsRunning:          sc.isRunning,
+		LastUpdate:         summary.LastUpdated,
+		ConfigPath:         sc.configPath,
+		TotalExchanges:     stats.TotalExchanges,
+		TotalSubscriptions: stats.TotalSubscriptions,
+		ConfigFileSize:     summary.FileSize,
+		HasActiveTimer:     sc.updateTimer != nil,
+		NextSyncTime:       sc.getNextSyncTime(),
 	}
 }
 
@@ -317,7 +317,7 @@ func (sc *SymbolCoordinator) getNextSyncTime() time.Time {
 	if !sc.isRunning || sc.updateTimer == nil {
 		return time.Time{}
 	}
-	
+
 	// 마지막 업데이트 시간 + 24시간
 	return sc.GetConfigSummary().LastUpdated.Add(24 * time.Hour)
 }

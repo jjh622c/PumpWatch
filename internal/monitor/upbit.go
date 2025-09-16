@@ -29,15 +29,15 @@ type UpbitMonitor struct {
 	storageManager *storage.Manager
 
 	// State management
-	ctx            context.Context
-	cancel         context.CancelFunc
-	ticker         *time.Ticker
-	running        bool
-	mu             sync.RWMutex
+	ctx     context.Context
+	cancel  context.CancelFunc
+	ticker  *time.Ticker
+	running bool
+	mu      sync.RWMutex
 
 	// Statistics
-	stats          MonitorStats
-	lastCheck      time.Time
+	stats     MonitorStats
+	lastCheck time.Time
 
 	// Notification cache to prevent duplicate processing
 	processedNotices map[string]time.Time
@@ -46,15 +46,14 @@ type UpbitMonitor struct {
 
 // MonitorStats holds monitoring statistics
 type MonitorStats struct {
-	TotalPolls          int64     `json:"total_polls"`
-	DetectedListings    int64     `json:"detected_listings"`
-	SuccessfulTriggers  int64     `json:"successful_triggers"`
-	FailedTriggers      int64     `json:"failed_triggers"`
-	LastCheck           time.Time `json:"last_check"`
-	LastDetection       time.Time `json:"last_detection"`
+	TotalPolls          int64         `json:"total_polls"`
+	DetectedListings    int64         `json:"detected_listings"`
+	SuccessfulTriggers  int64         `json:"successful_triggers"`
+	FailedTriggers      int64         `json:"failed_triggers"`
+	LastCheck           time.Time     `json:"last_check"`
+	LastDetection       time.Time     `json:"last_detection"`
 	AverageResponseTime time.Duration `json:"average_response_time"`
 }
-
 
 // NewUpbitMonitor creates a new Upbit monitor
 func NewUpbitMonitor(ctx context.Context, config config.UpbitConfig, taskManager DataCollectionManager, storageManager *storage.Manager) (*UpbitMonitor, error) {
@@ -366,10 +365,10 @@ func (um *UpbitMonitor) cleanupProcessedNotices() {
 type UpbitAPIResponse struct {
 	Success bool `json:"success"`
 	Data    struct {
-		TotalPages   int                  `json:"total_pages"`
-		TotalCount   int                  `json:"total_count"`
-		Notices      []UpbitAnnouncement  `json:"notices"`
-		FixedNotices []UpbitAnnouncement  `json:"fixed_notices"`
+		TotalPages   int                 `json:"total_pages"`
+		TotalCount   int                 `json:"total_count"`
+		Notices      []UpbitAnnouncement `json:"notices"`
+		FixedNotices []UpbitAnnouncement `json:"fixed_notices"`
 	} `json:"data"`
 }
 

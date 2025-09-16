@@ -43,38 +43,38 @@ func (s ConnectionStatus) String() string {
 type ErrorType int
 
 const (
-	ErrorTypeNetwork ErrorType = iota // 네트워크 에러 -> 재연결 시도
-	ErrorTypeAuth                     // 인증 에러 -> 설정 확인 후 재연결  
-	ErrorTypeRateLimit                // Rate limit -> 긴 쿨다운 후 재연결
-	ErrorTypeMarketData               // 마켓 데이터 에러 -> 심볼 목록 재확인
-	ErrorTypeCritical                 // 심각한 에러 -> Hard Reset
+	ErrorTypeNetwork    ErrorType = iota // 네트워크 에러 -> 재연결 시도
+	ErrorTypeAuth                        // 인증 에러 -> 설정 확인 후 재연결
+	ErrorTypeRateLimit                   // Rate limit -> 긴 쿨다운 후 재연결
+	ErrorTypeMarketData                  // 마켓 데이터 에러 -> 심볼 목록 재확인
+	ErrorTypeCritical                    // 심각한 에러 -> Hard Reset
 )
 
 // ExchangeWebSocketManager는 개별 거래소의 WebSocket 연결을 관리
 type ExchangeWebSocketManager struct {
-	ID                string             // 고유 ID (예: "binance-spot")
-	Exchange          string             // 거래소명 ("binance", "bybit" 등)
-	MarketType        string             // "spot" 또는 "futures"
-	Connection        *websocket.Conn    // WebSocket 연결
-	Status            ConnectionStatus   // 현재 연결 상태
-	SubscribedSymbols []string           // 구독 중인 심볼 목록
-	
+	ID                string           // 고유 ID (예: "binance-spot")
+	Exchange          string           // 거래소명 ("binance", "bybit" 등)
+	MarketType        string           // "spot" 또는 "futures"
+	Connection        *websocket.Conn  // WebSocket 연결
+	Status            ConnectionStatus // 현재 연결 상태
+	SubscribedSymbols []string         // 구독 중인 심볼 목록
+
 	// 재연결 관련
-	MaxSymbolsPerConnection int           // 거래소별 최대 심볼 수
-	RetryCount              int           // 현재 재시도 횟수
-	MaxRetries              int           // 최대 재시도 횟수
-	LastError               error         // 마지막 에러
-	CooldownUntil           time.Time     // 쿨다운 종료 시간
-	
+	MaxSymbolsPerConnection int       // 거래소별 최대 심볼 수
+	RetryCount              int       // 현재 재시도 횟수
+	MaxRetries              int       // 최대 재시도 횟수
+	LastError               error     // 마지막 에러
+	CooldownUntil           time.Time // 쿨다운 종료 시간
+
 	// 채널 관리
 	MessageChan chan []byte   // 수신 메시지 채널
 	ErrorChan   chan error    // 에러 채널
 	CloseChan   chan struct{} // 종료 신호 채널
-	
+
 	// Context 관리
 	ctx    context.Context
 	cancel context.CancelFunc
-	
+
 	// 통계
 	LastMessageTime time.Time // 마지막 메시지 수신 시간
 	TotalMessages   int64     // 총 수신 메시지 수
@@ -85,7 +85,7 @@ type ExchangeWebSocketManager struct {
 // NewExchangeWebSocketManager는 새로운 WebSocket Manager 생성
 func NewExchangeWebSocketManager(exchange, marketType string, config ExchangeConfig) *ExchangeWebSocketManager {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &ExchangeWebSocketManager{
 		ID:                      exchange + "-" + marketType,
 		Exchange:                exchange,
@@ -94,7 +94,7 @@ func NewExchangeWebSocketManager(exchange, marketType string, config ExchangeCon
 		SubscribedSymbols:       make([]string, 0),
 		MaxSymbolsPerConnection: config.MaxSymbolsPerConnection,
 		MaxRetries:              config.MaxRetries,
-		MessageChan:             make(chan []byte, 1000),   // 버퍼링된 채널
+		MessageChan:             make(chan []byte, 1000), // 버퍼링된 채널
 		ErrorChan:               make(chan error, 100),
 		CloseChan:               make(chan struct{}),
 		ctx:                     ctx,
@@ -123,11 +123,11 @@ func (m *ExchangeWebSocketManager) ShouldRetry() bool {
 	if m.RetryCount >= m.MaxRetries {
 		return false
 	}
-	
+
 	if m.Status == StatusCooldown && time.Now().Before(m.CooldownUntil) {
 		return false
 	}
-	
+
 	return true
 }
 
@@ -152,12 +152,12 @@ func (m *ExchangeWebSocketManager) Close() error {
 	if m.Connection != nil {
 		m.Connection.Close()
 	}
-	
+
 	m.cancel()
 	close(m.CloseChan)
 	close(m.MessageChan)
 	close(m.ErrorChan)
-	
+
 	m.Status = StatusDisconnected
 	return nil
 }
@@ -173,11 +173,11 @@ type RetryTask struct {
 
 // CircuitBreaker는 Circuit Breaker 패턴 구현
 type CircuitBreaker struct {
-	failureCount    int       // 실패 횟수
-	maxFailures     int       // 최대 실패 허용 횟수
+	failureCount    int           // 실패 횟수
+	maxFailures     int           // 최대 실패 허용 횟수
 	timeout         time.Duration // Circuit Open 유지 시간
-	lastFailureTime time.Time // 마지막 실패 시간
-	state           string    // "closed", "open", "half-open"
+	lastFailureTime time.Time     // 마지막 실패 시간
+	state           string        // "closed", "open", "half-open"
 }
 
 // NewCircuitBreaker는 새로운 Circuit Breaker 생성
@@ -217,7 +217,7 @@ func (cb *CircuitBreaker) OnSuccess() {
 func (cb *CircuitBreaker) OnFailure() {
 	cb.failureCount++
 	cb.lastFailureTime = time.Now()
-	
+
 	if cb.failureCount >= cb.maxFailures {
 		cb.state = "open"
 	}
@@ -234,7 +234,7 @@ type HardResetManager struct {
 	lastReset       time.Time     // 마지막 리셋 시간
 	resetCooldown   time.Duration // 리셋 쿨다운
 	maxResetPerHour int           // 시간당 최대 리셋 횟수
-	
+
 	// Critical error patterns that trigger hard reset
 	criticalErrors []string
 }
@@ -259,12 +259,12 @@ func (h *HardResetManager) ShouldTriggerHardReset(err error) bool {
 	if h.resetCount >= h.maxResetPerHour && time.Since(h.lastReset) < time.Hour {
 		return false
 	}
-	
+
 	// 쿨다운 시간 확인
 	if time.Since(h.lastReset) < h.resetCooldown {
 		return false
 	}
-	
+
 	// Critical error pattern 매칭
 	errorMsg := err.Error()
 	for _, pattern := range h.criticalErrors {
@@ -272,7 +272,7 @@ func (h *HardResetManager) ShouldTriggerHardReset(err error) bool {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -295,11 +295,11 @@ func (h *HardResetManager) GetResetCount() int {
 // SystemStatus는 전체 시스템 상태 정보
 type SystemStatus struct {
 	ActiveConnections    map[string]ConnectionStatus `json:"active_connections"`
-	PendingRetries       []RetryTask                  `json:"pending_retries"`
-	MemoryUsage          uint64                       `json:"memory_usage"`
-	LastHardReset        time.Time                    `json:"last_hard_reset"`
-	TotalEventsCollected int64                        `json:"total_events_collected"`
-	CircuitBreakerState  string                       `json:"circuit_breaker_state"`
+	PendingRetries       []RetryTask                 `json:"pending_retries"`
+	MemoryUsage          uint64                      `json:"memory_usage"`
+	LastHardReset        time.Time                   `json:"last_hard_reset"`
+	TotalEventsCollected int64                       `json:"total_events_collected"`
+	CircuitBreakerState  string                      `json:"circuit_breaker_state"`
 }
 
 // WebSocketTaskManager는 모든 WebSocket 연결을 관리하는 중앙 매니저
@@ -310,26 +310,26 @@ type WebSocketTaskManager struct {
 	circuitBreaker *CircuitBreaker                      // Circuit Breaker
 	hardResetMgr   *HardResetManager                    // Hard Reset Manager
 	emergencyStop  chan bool                            // 긴급 중단 신호
-	
+
 	ctx    context.Context
 	cancel context.CancelFunc
-	
+
 	// 통계 및 모니터링
-	totalMessages     int64     // 총 수신 메시지 수
-	totalReconnects   int64     // 총 재연결 횟수
-	totalHardResets   int64     // 총 Hard Reset 횟수
-	lastHealthCheck   time.Time // 마지막 Health Check 시간
+	totalMessages   int64     // 총 수신 메시지 수
+	totalReconnects int64     // 총 재연결 횟수
+	totalHardResets int64     // 총 Hard Reset 횟수
+	lastHealthCheck time.Time // 마지막 Health Check 시간
 }
 
 // NewWebSocketTaskManager는 새로운 Task Manager 생성
 func NewWebSocketTaskManager() *WebSocketTaskManager {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &WebSocketTaskManager{
 		managers:       make(map[string]*ExchangeWebSocketManager),
 		healthChecker:  time.NewTicker(30 * time.Second), // 30초 간격 Health Check
 		retryQueue:     make(chan RetryTask, 1000),
-		circuitBreaker: NewCircuitBreaker(5, 5*time.Minute), // 5회 실패시 5분 차단
+		circuitBreaker: NewCircuitBreaker(5, 5*time.Minute),    // 5회 실패시 5분 차단
 		hardResetMgr:   NewHardResetManager(3, 30*time.Minute), // 시간당 3회, 30분 쿨다운
 		emergencyStop:  make(chan bool),
 		ctx:            ctx,
@@ -359,7 +359,7 @@ func (wtm *WebSocketTaskManager) GetSystemStatus() SystemStatus {
 	for id, manager := range wtm.managers {
 		connections[id] = manager.GetStatus()
 	}
-	
+
 	var pendingRetries []RetryTask
 	// retryQueue에서 pending 작업들을 읽어옴 (non-blocking)
 	for {
@@ -371,7 +371,7 @@ func (wtm *WebSocketTaskManager) GetSystemStatus() SystemStatus {
 		}
 	}
 DONE:
-	
+
 	return SystemStatus{
 		ActiveConnections:    connections,
 		PendingRetries:       pendingRetries,
@@ -385,13 +385,13 @@ DONE:
 func (wtm *WebSocketTaskManager) Shutdown() error {
 	wtm.cancel()
 	wtm.healthChecker.Stop()
-	
+
 	for _, manager := range wtm.managers {
 		manager.Close()
 	}
-	
+
 	close(wtm.emergencyStop)
 	close(wtm.retryQueue)
-	
+
 	return nil
 }

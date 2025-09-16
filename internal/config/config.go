@@ -10,11 +10,13 @@ import (
 
 // Config represents the main system configuration
 type Config struct {
-	Upbit     UpbitConfig     `yaml:"upbit"`
-	Exchanges ExchangesConfig `yaml:"exchanges"`
-	Storage   StorageConfig   `yaml:"storage"`
-	Analysis  AnalysisConfig  `yaml:"analysis"`
-	System    SystemConfig    `yaml:"system"`
+	Upbit      UpbitConfig      `yaml:"upbit"`
+	Exchanges  ExchangesConfig  `yaml:"exchanges"`
+	Storage    StorageConfig    `yaml:"storage"`
+	Analysis   AnalysisConfig   `yaml:"analysis"`
+	Collection CollectionConfig `yaml:"collection"`
+	System     SystemConfig     `yaml:"system"`
+	Connection ConnectionConfig `yaml:"connection"`
 }
 
 // UpbitConfig represents Upbit monitoring configuration
@@ -39,47 +41,66 @@ type ExchangesConfig struct {
 // ExchangeConfig represents individual exchange configuration
 type ExchangeConfig struct {
 	Enabled                 bool          `yaml:"enabled"`
-	SpotEndpoint           string        `yaml:"spot_endpoint"`
-	FuturesEndpoint        string        `yaml:"futures_endpoint"`
+	SpotEndpoint            string        `yaml:"spot_endpoint"`
+	FuturesEndpoint         string        `yaml:"futures_endpoint"`
 	MaxSymbolsPerConnection int           `yaml:"max_symbols_per_connection"`
-	RetryCooldown          time.Duration `yaml:"retry_cooldown"`
-	MaxRetries             int           `yaml:"max_retries"`
-	ConnectionTimeout      time.Duration `yaml:"connection_timeout"`
-	ReadTimeout            time.Duration `yaml:"read_timeout"`
-	WriteTimeout           time.Duration `yaml:"write_timeout"`
+	RetryCooldown           time.Duration `yaml:"retry_cooldown"`
+	MaxRetries              int           `yaml:"max_retries"`
+	ConnectionTimeout       time.Duration `yaml:"connection_timeout"`
+	ReadTimeout             time.Duration `yaml:"read_timeout"`
+	WriteTimeout            time.Duration `yaml:"write_timeout"`
 }
 
 // StorageConfig represents storage configuration
 type StorageConfig struct {
-	Enabled         bool   `yaml:"enabled"`
-	DataDir         string `yaml:"data_dir"`
-	RawDataEnabled  bool   `yaml:"raw_data_enabled"`
-	RefinedEnabled  bool   `yaml:"refined_enabled"`
-	Compression     bool   `yaml:"compression"`
-	RetentionDays   int    `yaml:"retention_days"`
-	MaxFileSize     string `yaml:"max_file_size"`
-	BackupEnabled   bool   `yaml:"backup_enabled"`
-	BackupInterval  time.Duration `yaml:"backup_interval"`
+	Enabled        bool          `yaml:"enabled"`
+	DataDir        string        `yaml:"data_dir"`
+	RawDataEnabled bool          `yaml:"raw_data_enabled"`
+	RefinedEnabled bool          `yaml:"refined_enabled"`
+	Compression    bool          `yaml:"compression"`
+	RetentionDays  int           `yaml:"retention_days"`
+	MaxFileSize    string        `yaml:"max_file_size"`
+	BackupEnabled  bool          `yaml:"backup_enabled"`
+	BackupInterval time.Duration `yaml:"backup_interval"`
 }
 
 // AnalysisConfig represents pump analysis configuration
 type AnalysisConfig struct {
-	Enabled           bool    `yaml:"enabled"`
-	ThresholdPercent  float64 `yaml:"threshold_percent"`
-	TimeWindow        time.Duration `yaml:"time_window"`
-	MinVolumeRatio    float64 `yaml:"min_volume_ratio"`
-	MaxAnalysisDelay  time.Duration `yaml:"max_analysis_delay"`
+	Enabled          bool          `yaml:"enabled"`
+	ThresholdPercent float64       `yaml:"threshold_percent"`
+	TimeWindow       time.Duration `yaml:"time_window"`
+	MinVolumeRatio   float64       `yaml:"min_volume_ratio"`
+	MaxAnalysisDelay time.Duration `yaml:"max_analysis_delay"`
+}
+
+// CollectionConfig represents data collection timing configuration
+type CollectionConfig struct {
+	PreTriggerDuration time.Duration `yaml:"pre_trigger_duration"`
+	CollectionDuration time.Duration `yaml:"collection_duration"`
+	PostAnalysisDelay  time.Duration `yaml:"post_analysis_delay"`
 }
 
 // SystemConfig represents system-level configuration
 type SystemConfig struct {
-	LogLevel         string        `yaml:"log_level"`
-	MaxMemoryUsage   string        `yaml:"max_memory_usage"`
-	GCInterval       time.Duration `yaml:"gc_interval"`
-	StatusInterval   time.Duration `yaml:"status_interval"`
-	ShutdownTimeout  time.Duration `yaml:"shutdown_timeout"`
-	ProfilingEnabled bool          `yaml:"profiling_enabled"`
-	ProfilingPort    int           `yaml:"profiling_port"`
+	LogLevel             string        `yaml:"log_level"`
+	MaxMemoryUsage       string        `yaml:"max_memory_usage"`
+	GCInterval           time.Duration `yaml:"gc_interval"`
+	StatusInterval       time.Duration `yaml:"status_interval"`
+	ShutdownTimeout      time.Duration `yaml:"shutdown_timeout"`
+	StatusReportInterval time.Duration `yaml:"status_report_interval"`
+	AutoSaveInterval     time.Duration `yaml:"auto_save_interval"`
+	PoolStartupDelay     time.Duration `yaml:"pool_startup_delay"`
+	ProfilingEnabled     bool          `yaml:"profiling_enabled"`
+	ProfilingPort        int           `yaml:"profiling_port"`
+}
+
+// ConnectionConfig represents connection timing configuration
+type ConnectionConfig struct {
+	DefaultPingInterval      time.Duration `yaml:"default_ping_interval"`
+	DefaultConnectionTimeout time.Duration `yaml:"default_connection_timeout"`
+	DefaultRetryDelay        time.Duration `yaml:"default_retry_delay"`
+	BatchProcessingDelay     time.Duration `yaml:"batch_processing_delay"`
+	APIRateLimitDelay        time.Duration `yaml:"api_rate_limit_delay"`
 }
 
 // Load loads configuration from YAML file
@@ -146,69 +167,69 @@ func NewDefaultConfig() *Config {
 		Exchanges: ExchangesConfig{
 			Binance: ExchangeConfig{
 				Enabled:                 true,
-				SpotEndpoint:           "wss://stream.binance.com:9443/ws",
-				FuturesEndpoint:        "wss://fstream.binance.com/ws",
+				SpotEndpoint:            "wss://stream.binance.com:9443/ws",
+				FuturesEndpoint:         "wss://fstream.binance.com/ws",
 				MaxSymbolsPerConnection: 100,
-				RetryCooldown:          30 * time.Second,
-				MaxRetries:             5,
-				ConnectionTimeout:      30 * time.Second,
-				ReadTimeout:            60 * time.Second,
-				WriteTimeout:           10 * time.Second,
+				RetryCooldown:           30 * time.Second,
+				MaxRetries:              5,
+				ConnectionTimeout:       30 * time.Second,
+				ReadTimeout:             60 * time.Second,
+				WriteTimeout:            10 * time.Second,
 			},
 			Bybit: ExchangeConfig{
 				Enabled:                 true,
-				SpotEndpoint:           "wss://stream.bybit.com/v5/public/spot",
-				FuturesEndpoint:        "wss://stream.bybit.com/v5/public/linear",
+				SpotEndpoint:            "wss://stream.bybit.com/v5/public/spot",
+				FuturesEndpoint:         "wss://stream.bybit.com/v5/public/linear",
 				MaxSymbolsPerConnection: 50,
-				RetryCooldown:          60 * time.Second,
-				MaxRetries:             3,
-				ConnectionTimeout:      30 * time.Second,
-				ReadTimeout:            60 * time.Second,
-				WriteTimeout:           10 * time.Second,
+				RetryCooldown:           60 * time.Second,
+				MaxRetries:              3,
+				ConnectionTimeout:       30 * time.Second,
+				ReadTimeout:             60 * time.Second,
+				WriteTimeout:            10 * time.Second,
 			},
 			OKX: ExchangeConfig{
 				Enabled:                 true,
-				SpotEndpoint:           "wss://ws.okx.com:8443/ws/v5/public",
-				FuturesEndpoint:        "wss://ws.okx.com:8443/ws/v5/public",
+				SpotEndpoint:            "wss://ws.okx.com:8443/ws/v5/public",
+				FuturesEndpoint:         "wss://ws.okx.com:8443/ws/v5/public",
 				MaxSymbolsPerConnection: 100,
-				RetryCooldown:          30 * time.Second,
-				MaxRetries:             5,
-				ConnectionTimeout:      30 * time.Second,
-				ReadTimeout:            60 * time.Second,
-				WriteTimeout:           10 * time.Second,
+				RetryCooldown:           30 * time.Second,
+				MaxRetries:              5,
+				ConnectionTimeout:       30 * time.Second,
+				ReadTimeout:             60 * time.Second,
+				WriteTimeout:            10 * time.Second,
 			},
 			KuCoin: ExchangeConfig{
 				Enabled:                 true,
-				SpotEndpoint:           "wss://ws-api.kucoin.com/endpoint",
-				FuturesEndpoint:        "wss://ws-api-futures.kucoin.com/endpoint",
+				SpotEndpoint:            "wss://ws-api.kucoin.com/endpoint",
+				FuturesEndpoint:         "wss://ws-api-futures.kucoin.com/endpoint",
 				MaxSymbolsPerConnection: 100,
-				RetryCooldown:          45 * time.Second,
-				MaxRetries:             4,
-				ConnectionTimeout:      30 * time.Second,
-				ReadTimeout:            60 * time.Second,
-				WriteTimeout:           10 * time.Second,
+				RetryCooldown:           45 * time.Second,
+				MaxRetries:              4,
+				ConnectionTimeout:       30 * time.Second,
+				ReadTimeout:             60 * time.Second,
+				WriteTimeout:            10 * time.Second,
 			},
 			Phemex: ExchangeConfig{
 				Enabled:                 true,
-				SpotEndpoint:           "wss://ws.phemex.com",
-				FuturesEndpoint:        "wss://ws.phemex.com",
+				SpotEndpoint:            "wss://ws.phemex.com",
+				FuturesEndpoint:         "wss://ws.phemex.com",
 				MaxSymbolsPerConnection: 20,
-				RetryCooldown:          90 * time.Second,
-				MaxRetries:             3,
-				ConnectionTimeout:      30 * time.Second,
-				ReadTimeout:            60 * time.Second,
-				WriteTimeout:           10 * time.Second,
+				RetryCooldown:           90 * time.Second,
+				MaxRetries:              3,
+				ConnectionTimeout:       30 * time.Second,
+				ReadTimeout:             60 * time.Second,
+				WriteTimeout:            10 * time.Second,
 			},
 			Gate: ExchangeConfig{
 				Enabled:                 true,
-				SpotEndpoint:           "wss://api.gateio.ws/ws/v4/",
-				FuturesEndpoint:        "wss://fx-ws.gateio.ws/v4/ws",
+				SpotEndpoint:            "wss://api.gateio.ws/ws/v4/",
+				FuturesEndpoint:         "wss://fx-ws.gateio.ws/v4/ws/usdt",
 				MaxSymbolsPerConnection: 100,
-				RetryCooldown:          30 * time.Second,
-				MaxRetries:             5,
-				ConnectionTimeout:      30 * time.Second,
-				ReadTimeout:            60 * time.Second,
-				WriteTimeout:           10 * time.Second,
+				RetryCooldown:           30 * time.Second,
+				MaxRetries:              5,
+				ConnectionTimeout:       30 * time.Second,
+				ReadTimeout:             60 * time.Second,
+				WriteTimeout:            10 * time.Second,
 			},
 		},
 		Storage: StorageConfig{
@@ -229,14 +250,29 @@ func NewDefaultConfig() *Config {
 			MinVolumeRatio:   2.0,
 			MaxAnalysisDelay: 10 * time.Second,
 		},
+		Collection: CollectionConfig{
+			PreTriggerDuration: 20 * time.Second,
+			CollectionDuration: 20 * time.Second,
+			PostAnalysisDelay:  2 * time.Second,
+		},
 		System: SystemConfig{
-			LogLevel:         "info",
-			MaxMemoryUsage:   "16GB",
-			GCInterval:       5 * time.Minute,
-			StatusInterval:   60 * time.Second,
-			ShutdownTimeout:  30 * time.Second,
-			ProfilingEnabled: false,
-			ProfilingPort:    6060,
+			LogLevel:             "info",
+			MaxMemoryUsage:       "16GB",
+			GCInterval:           5 * time.Minute,
+			StatusInterval:       60 * time.Second,
+			ShutdownTimeout:      30 * time.Second,
+			StatusReportInterval: 60 * time.Second,
+			AutoSaveInterval:     5 * time.Minute,
+			PoolStartupDelay:     500 * time.Millisecond,
+			ProfilingEnabled:     false,
+			ProfilingPort:        6060,
+		},
+		Connection: ConnectionConfig{
+			DefaultPingInterval:      25 * time.Second,
+			DefaultConnectionTimeout: 30 * time.Second,
+			DefaultRetryDelay:        1 * time.Second,
+			BatchProcessingDelay:     500 * time.Millisecond,
+			APIRateLimitDelay:        100 * time.Millisecond,
 		},
 	}
 }
@@ -293,7 +329,7 @@ func (c *Config) Validate() error {
 // GetEnabledExchanges returns list of enabled exchanges
 func (c *Config) GetEnabledExchanges() []string {
 	var enabled []string
-	
+
 	exchanges := map[string]ExchangeConfig{
 		"binance": c.Exchanges.Binance,
 		"bybit":   c.Exchanges.Bybit,

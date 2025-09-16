@@ -3,6 +3,7 @@ package websocket
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,8 +18,8 @@ import (
 
 // EnhancedTaskManager manages multiple WorkerPools for all exchanges with intelligent scaling
 type EnhancedTaskManager struct {
-	ctx             context.Context
-	cancel          context.CancelFunc
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	// Configuration
 	exchangesConfig config.ExchangesConfig
@@ -27,12 +28,12 @@ type EnhancedTaskManager struct {
 	pumpAnalyzer    *analyzer.PumpAnalyzer
 
 	// Multi-worker connection management
-	workerPools     map[string]*WorkerPool // key: "exchange_markettype"
-	poolsMu         sync.RWMutex
+	workerPools map[string]*WorkerPool // key: "exchange_markettype"
+	poolsMu     sync.RWMutex
 
 	// Intelligent error recovery system
 	recoveryScheduler *recovery.ReconnectionScheduler
-	logger           *logging.Logger
+	logger            *logging.Logger
 
 	// Data collection
 	currentCollection *models.CollectionEvent
@@ -40,42 +41,42 @@ type EnhancedTaskManager struct {
 	collectionTimer   *time.Timer
 
 	// Enhanced statistics tracking
-	stats           EnhancedTaskManagerStats
-	statsMu         sync.RWMutex
+	stats   EnhancedTaskManagerStats
+	statsMu sync.RWMutex
 
 	// Health monitoring
-	healthTicker    *time.Ticker
-	running         bool
-	runningMu       sync.RWMutex
+	healthTicker *time.Ticker
+	running      bool
+	runningMu    sync.RWMutex
 }
 
 // EnhancedTaskManagerStats holds comprehensive task manager statistics
 type EnhancedTaskManagerStats struct {
-	TotalPools             int       `json:"total_pools"`
-	ActivePools            int       `json:"active_pools"`
-	TotalWorkers           int       `json:"total_workers"`
-	ActiveWorkers          int       `json:"active_workers"`
-	TotalSymbols           int       `json:"total_symbols"`
-	TotalMessagesReceived  int64     `json:"total_messages_received"`
-	MessagesPerSecond      float64   `json:"messages_per_second"`
-	LastHealthCheck        time.Time `json:"last_health_check"`
-	LastDataCollection     time.Time `json:"last_data_collection"`
-	CollectionActive       bool      `json:"collection_active"`
+	TotalPools            int       `json:"total_pools"`
+	ActivePools           int       `json:"active_pools"`
+	TotalWorkers          int       `json:"total_workers"`
+	ActiveWorkers         int       `json:"active_workers"`
+	TotalSymbols          int       `json:"total_symbols"`
+	TotalMessagesReceived int64     `json:"total_messages_received"`
+	MessagesPerSecond     float64   `json:"messages_per_second"`
+	LastHealthCheck       time.Time `json:"last_health_check"`
+	LastDataCollection    time.Time `json:"last_data_collection"`
+	CollectionActive      bool      `json:"collection_active"`
 
 	// Per-exchange statistics
-	ExchangeStats          map[string]ExchangeStats `json:"exchange_stats"`
+	ExchangeStats map[string]ExchangeStats `json:"exchange_stats"`
 }
 
 // ExchangeStats holds statistics for a specific exchange
 type ExchangeStats struct {
-	Exchange         string `json:"exchange"`
-	TotalWorkers     int    `json:"total_workers"`
-	ActiveWorkers    int    `json:"active_workers"`
-	TotalSymbols     int    `json:"total_symbols"`
-	TotalMessages    int64  `json:"total_messages"`
-	AvgLatency       float64 `json:"avg_latency_ms"`
-	ErrorRate        float64 `json:"error_rate"`
-	UptimePercent    float64 `json:"uptime_percent"`
+	Exchange      string  `json:"exchange"`
+	TotalWorkers  int     `json:"total_workers"`
+	ActiveWorkers int     `json:"active_workers"`
+	TotalSymbols  int     `json:"total_symbols"`
+	TotalMessages int64   `json:"total_messages"`
+	AvgLatency    float64 `json:"avg_latency_ms"`
+	ErrorRate     float64 `json:"error_rate"`
+	UptimePercent float64 `json:"uptime_percent"`
 }
 
 // NewEnhancedTaskManager creates a new enhanced WebSocket task manager with multi-worker support
@@ -133,8 +134,9 @@ func (tm *EnhancedTaskManager) initializeWorkerPools() error {
 				continue
 			}
 
-			// Create worker pool
-			pool, err := NewWorkerPool(tm.ctx, exchange, market, symbols)
+			// Create worker pool with config from config.yaml
+			exchangeConfig := tm.getExchangeConfigForWorkerPool(exchange)
+			pool, err := NewWorkerPool(tm.ctx, exchange, market, symbols, exchangeConfig)
 			if err != nil {
 				tm.logger.Error("❌ Failed to create worker pool for %s: %v", poolID, err)
 				continue
@@ -170,6 +172,11 @@ func (tm *EnhancedTaskManager) setupPoolCallbacks(pool *WorkerPool, exchange, ma
 		tm.handleTradeEvent(exchange, marketType, tradeEvent)
 	}
 
+	// 🔧 FIX: 이미 생성된 Worker들의 콜백도 다시 설정
+	for _, worker := range pool.Workers {
+		worker.OnTradeEvent = pool.OnTradeEvent
+	}
+
 	// Error callback for recovery system
 	pool.OnError = func(err error) {
 		tm.recoveryScheduler.HandleError(exchange, marketType, err)
@@ -201,8 +208,13 @@ func (tm *EnhancedTaskManager) handleTradeEvent(exchange, marketType string, tra
 	tm.statsMu.Lock()
 	tm.stats.TotalMessagesReceived++
 
-	// Update exchange-specific stats
-	exchangeStats := tm.stats.ExchangeStats[exchange]
+	// Update exchange-specific stats (ensure entry exists)
+	exchangeStats, exists := tm.stats.ExchangeStats[exchange]
+	if !exists {
+		exchangeStats = ExchangeStats{
+			Exchange: exchange,
+		}
+	}
 	exchangeStats.TotalMessages++
 	tm.stats.ExchangeStats[exchange] = exchangeStats
 	tm.statsMu.Unlock()
@@ -215,41 +227,18 @@ func (tm *EnhancedTaskManager) handleTradeEvent(exchange, marketType string, tra
 	tm.collectionMu.RUnlock()
 }
 
-// storeTradeEvent stores trade event in appropriate CollectionEvent slice
+// storeTradeEvent stores trade event using CollectionEvent.AddTrade() with proper time filtering
 func (tm *EnhancedTaskManager) storeTradeEvent(exchange, marketType string, tradeEvent *models.TradeEvent) {
 	if tm.currentCollection == nil {
 		return
 	}
 
-	connID := fmt.Sprintf("%s_%s", exchange, marketType)
+	// Set exchange and market type in trade event for proper filtering
+	tradeEvent.Exchange = exchange
+	tradeEvent.MarketType = marketType
 
-	// Store in appropriate slice based on connection ID
-	switch connID {
-	case "binance_spot":
-		tm.currentCollection.BinanceSpot = append(tm.currentCollection.BinanceSpot, *tradeEvent)
-	case "binance_futures":
-		tm.currentCollection.BinanceFutures = append(tm.currentCollection.BinanceFutures, *tradeEvent)
-	case "bybit_spot":
-		tm.currentCollection.BybitSpot = append(tm.currentCollection.BybitSpot, *tradeEvent)
-	case "bybit_futures":
-		tm.currentCollection.BybitFutures = append(tm.currentCollection.BybitFutures, *tradeEvent)
-	case "okx_spot":
-		tm.currentCollection.OKXSpot = append(tm.currentCollection.OKXSpot, *tradeEvent)
-	case "okx_futures":
-		tm.currentCollection.OKXFutures = append(tm.currentCollection.OKXFutures, *tradeEvent)
-	case "kucoin_spot":
-		tm.currentCollection.KuCoinSpot = append(tm.currentCollection.KuCoinSpot, *tradeEvent)
-	case "kucoin_futures":
-		tm.currentCollection.KuCoinFutures = append(tm.currentCollection.KuCoinFutures, *tradeEvent)
-	case "phemex_spot":
-		tm.currentCollection.PhemexSpot = append(tm.currentCollection.PhemexSpot, *tradeEvent)
-	case "phemex_futures":
-		tm.currentCollection.PhemexFutures = append(tm.currentCollection.PhemexFutures, *tradeEvent)
-	case "gate_spot":
-		tm.currentCollection.GateSpot = append(tm.currentCollection.GateSpot, *tradeEvent)
-	case "gate_futures":
-		tm.currentCollection.GateFutures = append(tm.currentCollection.GateFutures, *tradeEvent)
-	}
+	// Use CollectionEvent.AddTrade() which includes time filtering logic
+	tm.currentCollection.AddTrade(*tradeEvent)
 }
 
 // Start begins the Enhanced WebSocket Task Manager
@@ -516,8 +505,54 @@ func (tm *EnhancedTaskManager) performHealthCheck() {
 	}
 	tm.poolsMu.RUnlock()
 
-	tm.logger.Info("💗 Health check - Active Pools: %d/%d, Active Workers: %d/%d, Total Messages: %d",
-		tm.stats.ActivePools, tm.stats.TotalPools, tm.stats.ActiveWorkers, tm.stats.TotalWorkers, tm.stats.TotalMessagesReceived)
+	// 거래소별 상태 요약 생성
+	var exchangeSummary []string
+	exchangeAbbrev := map[string]string{
+		"binance": "BN", "bybit": "BY", "okx": "OKX",
+		"kucoin": "KC", "phemex": "PH", "gate": "GT",
+	}
+
+	tm.poolsMu.RLock()
+	exchangeWorkers := make(map[string][2]int) // [spot_workers, futures_workers]
+
+	for _, pool := range tm.workerPools {
+		if _, exists := exchangeWorkers[pool.Exchange]; !exists {
+			exchangeWorkers[pool.Exchange] = [2]int{0, 0}
+		}
+		workers := exchangeWorkers[pool.Exchange]
+		if pool.MarketType == "spot" {
+			workers[0] = pool.GetStats()["active_workers"].(int)
+		} else {
+			workers[1] = pool.GetStats()["active_workers"].(int)
+		}
+		exchangeWorkers[pool.Exchange] = workers
+	}
+	tm.poolsMu.RUnlock()
+
+	// 거래소별 요약 생성 (spot+futures 형태)
+	for _, exchange := range []string{"binance", "bybit", "okx", "kucoin", "phemex", "gate"} {
+		abbrev := exchangeAbbrev[exchange]
+		workers, exists := exchangeWorkers[exchange]
+		if !exists || (workers[0] == 0 && workers[1] == 0) {
+			exchangeSummary = append(exchangeSummary, fmt.Sprintf("%s(0+0❌)", abbrev))
+		} else {
+			exchangeSummary = append(exchangeSummary, fmt.Sprintf("%s(%d+%d✅)", abbrev, workers[0], workers[1]))
+		}
+	}
+
+	// 메시지 수 포맷팅 (K, M 단위)
+	msgCount := tm.stats.TotalMessagesReceived
+	var msgStr string
+	if msgCount >= 1000000 {
+		msgStr = fmt.Sprintf("%.1fM", float64(msgCount)/1000000)
+	} else if msgCount >= 1000 {
+		msgStr = fmt.Sprintf("%.1fK", float64(msgCount)/1000)
+	} else {
+		msgStr = fmt.Sprintf("%d", msgCount)
+	}
+
+	tm.logger.Info("💗 Health: %s | %d/%d workers, %s msgs",
+		strings.Join(exchangeSummary, ", "), tm.stats.ActiveWorkers, tm.stats.TotalWorkers, msgStr)
 }
 
 // GetStats returns current enhanced task manager statistics
@@ -586,4 +621,49 @@ func (tm *EnhancedTaskManager) getExchangeConfig(exchange string) *config.Exchan
 	default:
 		return nil
 	}
+}
+
+// getExchangeConfigForWorkerPool converts config.ExchangeConfig to ExchangeWorkerConfig
+func (tm *EnhancedTaskManager) getExchangeConfigForWorkerPool(exchange string) ExchangeWorkerConfig {
+	var exchangeConfig config.ExchangeConfig
+
+	switch exchange {
+	case "binance":
+		exchangeConfig = tm.exchangesConfig.Binance
+	case "bybit":
+		exchangeConfig = tm.exchangesConfig.Bybit
+	case "okx":
+		exchangeConfig = tm.exchangesConfig.OKX
+	case "kucoin":
+		exchangeConfig = tm.exchangesConfig.KuCoin
+	case "gate":
+		exchangeConfig = tm.exchangesConfig.Gate
+	case "phemex":
+		exchangeConfig = tm.exchangesConfig.Phemex
+	default:
+		// Fallback to hardcoded values for unknown exchanges
+		tm.logger.Warn("⚠️ Unknown exchange %s, using default config", exchange)
+		return getExchangeWorkerConfig(exchange)
+	}
+
+	// Convert config.ExchangeConfig to ExchangeWorkerConfig
+	workerConfig := ExchangeWorkerConfig{
+		MaxSymbolsPerConnection: exchangeConfig.MaxSymbolsPerConnection,
+		MaxConnections:          10, // Conservative default
+		PingInterval:            20 * time.Second,
+		ConnectionTimeout:       exchangeConfig.ConnectionTimeout,
+		RateLimit:               5, // Conservative default
+		RateLimitInterval:       1 * time.Second,
+	}
+
+	// 하드코딩 오버라이드 제거 - config.yaml 설정을 우선 사용
+	// 추가 설정이 필요한 경우 config.yaml에서 설정하세요
+	// 기본값은 이미 설정되어 있으므로 별도의 하드코딩 조정 불필요
+	tm.logger.Debug("%s 거래소: config.yaml 설정 사용 (MaxConnections=%d, ConnectionTimeout=%v, RateLimit=%d)",
+		exchange, workerConfig.MaxConnections, workerConfig.ConnectionTimeout, workerConfig.RateLimit)
+
+	tm.logger.Info("📋 Using config for %s: MaxSymbols=%d, MaxConnections=%d",
+		exchange, workerConfig.MaxSymbolsPerConnection, workerConfig.MaxConnections)
+
+	return workerConfig
 }

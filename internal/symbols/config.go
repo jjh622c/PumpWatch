@@ -11,23 +11,23 @@ import (
 
 // SymbolsConfig represents the symbols configuration structure
 type SymbolsConfig struct {
-	Version         string                     `yaml:"version"`
-	UpdatedAt       time.Time                  `yaml:"updated_at"`
-	UpbitKRWSymbols []string                   `yaml:"upbit_krw_symbols"`
-	Exchanges       map[string]ExchangeSymbols `yaml:"exchanges"`
-	SubscriptionLists map[string][]string      `yaml:"subscription_lists"`
+	Version           string                     `yaml:"version"`
+	UpdatedAt         time.Time                  `yaml:"updated_at"`
+	UpbitKRWSymbols   []string                   `yaml:"upbit_krw_symbols"`
+	Exchanges         map[string]ExchangeSymbols `yaml:"exchanges"`
+	SubscriptionLists map[string][]string        `yaml:"subscription_lists"`
 }
 
 // ExchangeSymbols represents exchange-specific symbol configuration
 type ExchangeSymbols struct {
-	SpotEndpoint               string        `yaml:"spot_endpoint"`
-	FuturesEndpoint           string        `yaml:"futures_endpoint"`
-	MaxSymbolsPerConnection   int           `yaml:"max_symbols_per_connection"`
-	RetryCooldown            time.Duration `yaml:"retry_cooldown"`
-	MaxRetries               int           `yaml:"max_retries"`
-	SpotSymbols              []string      `yaml:"spot_symbols"`
-	FuturesSymbols           []string      `yaml:"futures_symbols"`
-	LastUpdated              time.Time     `yaml:"last_updated"`
+	SpotEndpoint            string        `yaml:"spot_endpoint"`
+	FuturesEndpoint         string        `yaml:"futures_endpoint"`
+	MaxSymbolsPerConnection int           `yaml:"max_symbols_per_connection"`
+	RetryCooldown           time.Duration `yaml:"retry_cooldown"`
+	MaxRetries              int           `yaml:"max_retries"`
+	SpotSymbols             []string      `yaml:"spot_symbols"`
+	FuturesSymbols          []string      `yaml:"futures_symbols"`
+	LastUpdated             time.Time     `yaml:"last_updated"`
 }
 
 // LoadConfig loads symbols configuration from YAML file
@@ -52,7 +52,7 @@ func LoadConfig(configPath string) (*SymbolsConfig, error) {
 // SaveConfig saves symbols configuration to YAML file
 func SaveConfig(config *SymbolsConfig, configPath string) error {
 	config.UpdatedAt = time.Now()
-	
+
 	data, err := yaml.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal symbols config: %w", err)
@@ -94,7 +94,7 @@ func (sc *SymbolsConfig) Validate() error {
 	return nil
 }
 
-// GetFilteredSymbols returns symbols for a specific exchange and market type, 
+// GetFilteredSymbols returns symbols for a specific exchange and market type,
 // filtered to exclude Upbit KRW symbols
 func (sc *SymbolsConfig) GetFilteredSymbols(exchange, marketType string) []string {
 	exchangeConfig, exists := sc.Exchanges[exchange]

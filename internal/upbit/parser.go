@@ -9,8 +9,8 @@ import (
 type NoticeParser struct {
 	// 5가지 상장공고 패턴 (flash-upbit에서 검증된 패턴들)
 	patternMulti       *regexp.Regexp // Pattern 1: 셀레스티아(TIA)(KRW, BTC, USDT 마켓)
-	patternCoins       *regexp.Regexp // Pattern 2: coins with parenthesis markets  
-	patternMarketParen *regexp.Regexp // Pattern 2: (BTC, USDT 마켓) 
+	patternCoins       *regexp.Regexp // Pattern 2: coins with parenthesis markets
+	patternMarketParen *regexp.Regexp // Pattern 2: (BTC, USDT 마켓)
 	patternMarketOut   *regexp.Regexp // Pattern 3: KRW, USDT 마켓 (outside parenthesis)
 	patternSingle      *regexp.Regexp // Pattern 4: 봉크(BONK) KRW 마켓
 	patternCoinList    *regexp.Regexp // Pattern 5: USDT 마켓 디지털 자산 추가 (AGLD, AHT, ...)
@@ -21,17 +21,17 @@ func NewNoticeParser() *NoticeParser {
 	return &NoticeParser{
 		// Pattern 1: multiple coin(market), e.g. 셀레스티아(TIA)(KRW, BTC, USDT 마켓), 아이오넷(IO)(BTC, USDT 마켓)
 		patternMulti: regexp.MustCompile(`([가-힣A-Za-z0-9]+)\(([A-Z0-9]+)\)\(([^)]+) 마켓\)`),
-		
+
 		// Pattern 2: coins ... 신규 거래지원 안내 (BTC, USDT 마켓)
 		patternCoins:       regexp.MustCompile(`([가-힣A-Za-z0-9]+)\(([A-Z0-9]+)\)`),
 		patternMarketParen: regexp.MustCompile(`\(([A-Z, ]+) 마켓\)`),
-		
+
 		// Pattern 3: coins ... KRW, USDT 마켓 디지털 자산 추가 (market outside parenthesis)
 		patternMarketOut: regexp.MustCompile(`([A-Z, ]+) 마켓`),
-		
+
 		// Pattern 4: single coin, single market (e.g. 봉크(BONK) KRW 마켓 디지털 자산 추가)
 		patternSingle: regexp.MustCompile(`([가-힣A-Za-z0-9]+)\(([A-Z0-9]+)\) ([A-Z, ]+) 마켓`),
-		
+
 		// Pattern 5: market + coin-list in parenthesis
 		patternCoinList: regexp.MustCompile(`(KRW|BTC|USDT) 마켓 디지털 자산 추가 \(([^)]+)\)`),
 	}
@@ -46,7 +46,7 @@ func (p *NoticeParser) ParseListings(title string) []UpbitListing {
 	if len(multiMatches) > 0 {
 		for _, m := range multiMatches {
 			listings = append(listings, UpbitListing{
-				Symbol:  m[2], // TIA
+				Symbol:  m[2],                 // TIA
 				Markets: p.cleanMarkets(m[3]), // KRW, BTC, USDT
 			})
 		}
@@ -133,13 +133,13 @@ func (p *NoticeParser) IsListingNotice(title string) bool {
 		"마켓 추가",
 		"상장",
 	}
-	
+
 	for _, keyword := range keywords {
 		if strings.Contains(title, keyword) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -160,13 +160,13 @@ func (p *NoticeParser) ExtractSymbolsFromTitle(title string) []string {
 	// 괄호 안의 대문자 패턴들을 모두 추출
 	re := regexp.MustCompile(`\(([A-Z0-9]+)\)`)
 	matches := re.FindAllStringSubmatch(title, -1)
-	
+
 	symbols := make([]string, 0)
 	for _, match := range matches {
 		if len(match) > 1 && p.ValidateSymbol(match[1]) {
 			symbols = append(symbols, match[1])
 		}
 	}
-	
+
 	return symbols
 }

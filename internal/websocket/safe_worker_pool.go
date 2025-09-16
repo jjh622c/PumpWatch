@@ -25,7 +25,7 @@ type SafeWorkerPool struct {
 	cancel context.CancelFunc
 
 	// Worker 관리
-	workers    []*SafeWorker
+	workers     []*SafeWorker
 	workerCount int
 
 	// 설정
@@ -49,13 +49,13 @@ type SafeWorkerPool struct {
 
 // SafePoolStats는 풀 전체 통계
 type SafePoolStats struct {
-	TotalWorkers    int32 // atomic
-	ActiveWorkers   int32 // atomic
-	TotalSymbols    int32 // atomic
-	TotalMessages   int64 // atomic
-	TotalTrades     int64 // atomic
-	TotalErrors     int64 // atomic
-	LastActivity    int64 // atomic (unix nano)
+	TotalWorkers  int32 // atomic
+	ActiveWorkers int32 // atomic
+	TotalSymbols  int32 // atomic
+	TotalMessages int64 // atomic
+	TotalTrades   int64 // atomic
+	TotalErrors   int64 // atomic
+	LastActivity  int64 // atomic (unix nano)
 }
 
 // ExchangeConfig는 거래소별 설정
@@ -239,53 +239,21 @@ func (p *SafeWorkerPool) distributeSymbols() [][]string {
 	return chunks
 }
 
-// createConnector는 거래소별 커넥터 생성
+// createConnector는 거래소별 커넥터 생성 (레지스트리 기반)
 func (p *SafeWorkerPool) createConnector() (connectors.WebSocketConnector, error) {
 	maxSymbols := p.exchangeConfig.MaxSymbolsPerConnection
 	if maxSymbols <= 0 {
 		maxSymbols = 100 // 기본값
 	}
 
-	switch p.Exchange {
-	case "binance":
-		if p.MarketType == "spot" {
-			return connectors.NewBinanceConnector("spot", maxSymbols), nil
-		} else {
-			return connectors.NewBinanceConnector("futures", maxSymbols), nil
-		}
-	case "bybit":
-		if p.MarketType == "spot" {
-			return connectors.NewBybitConnector("spot", maxSymbols), nil
-		} else {
-			return connectors.NewBybitConnector("futures", maxSymbols), nil
-		}
-	case "okx":
-		if p.MarketType == "spot" {
-			return connectors.NewOKXConnector("spot", maxSymbols), nil
-		} else {
-			return connectors.NewOKXConnector("futures", maxSymbols), nil
-		}
-	case "kucoin":
-		if p.MarketType == "spot" {
-			return connectors.NewKuCoinConnector("spot", maxSymbols), nil
-		} else {
-			return connectors.NewKuCoinConnector("futures", maxSymbols), nil
-		}
-	case "gate":
-		if p.MarketType == "spot" {
-			return connectors.NewGateConnector("spot", maxSymbols), nil
-		} else {
-			return connectors.NewGateConnector("futures", maxSymbols), nil
-		}
-	case "phemex":
-		if p.MarketType == "spot" {
-			return connectors.NewPhemexConnector("spot", maxSymbols), nil
-		} else {
-			return connectors.NewPhemexConnector("futures", maxSymbols), nil
-		}
-	default:
-		return nil, fmt.Errorf("지원하지 않는 거래소: %s", p.Exchange)
+	// 레지스트리에서 커넥터 팩토리 가져오기
+	factory, err := connectors.GetConnectorFactory(p.Exchange)
+	if err != nil {
+		return nil, fmt.Errorf("커넥터 팩토리 가져오기 실패: %w", err)
 	}
+
+	// 커넥터 생성
+	return factory(p.MarketType, maxSymbols), nil
 }
 
 // handleTradeEvent는 거래 이벤트 처리

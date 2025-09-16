@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"PumpWatch/internal/logging"
 	"PumpWatch/internal/models"
+	"github.com/gorilla/websocket"
 )
 
 // WebSocketConnector는 거래소별 WebSocket 연결의 기본 인터페이스
@@ -21,12 +21,12 @@ type WebSocketConnector interface {
 	Connect(ctx context.Context, symbols []string) error
 	Disconnect() error
 	IsConnected() bool
-	
+
 	// 구독 관리
 	Subscribe(symbols []string) error
 	Unsubscribe(symbols []string) error
 	GetSubscribedSymbols() []string
-	
+
 	// 메시지 처리
 	StartMessageLoop(ctx context.Context, messageChan chan<- models.TradeEvent) error
 	ParseTradeMessage([]byte) ([]models.TradeEvent, error)
@@ -40,30 +40,30 @@ type WebSocketConnector interface {
 
 // BaseConnector는 공통 WebSocket 기능을 제공하는 기본 구조체
 type BaseConnector struct {
-	Exchange    string
-	MarketType  string
-	Endpoint    string
-	
-	Connection  *websocket.Conn
-	IsActive    bool
-	mu          sync.RWMutex // 연결 상태 동기화용
-	
+	Exchange   string
+	MarketType string
+	Endpoint   string
+
+	Connection *websocket.Conn
+	IsActive   bool
+	mu         sync.RWMutex // 연결 상태 동기화용
+
 	// 구독 정보
 	SubscribedSymbols []string
 	MaxSymbols        int
-	
+
 	// 통계
-	LastMessageTime   time.Time
-	TotalMessages     int64
-	ReconnectCount    int
-	
-	// 로깅  
+	LastMessageTime time.Time
+	TotalMessages   int64
+	ReconnectCount  int
+
+	// 로깅
 	logger *logging.Logger
-	
+
 	// 콜백
-	OnMessage    func([]byte)
-	OnError      func(error)
-	OnReconnect  func()
+	OnMessage   func([]byte)
+	OnError     func(error)
+	OnReconnect func()
 }
 
 // ConnectionInfo는 연결 상태 정보
@@ -135,14 +135,14 @@ func (bc *BaseConnector) InitLogger() {
 func (bc *BaseConnector) Disconnect() error {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
-	
+
 	if bc.Connection != nil {
 		bc.Connection.Close()
 		bc.Connection = nil
 	}
 	bc.IsActive = false
 	bc.SubscribedSymbols = []string{}
-	
+
 	log.Printf("🔌 %s %s 연결 종료", bc.Exchange, bc.MarketType)
 	return nil
 }
@@ -153,23 +153,23 @@ func (bc *BaseConnector) connectWebSocket(endpoint string) error {
 		Proxy:            websocket.DefaultDialer.Proxy,
 		HandshakeTimeout: 45 * time.Second,
 	}
-	
+
 	u, err := url.Parse(endpoint)
 	if err != nil {
 		return fmt.Errorf("URL 파싱 실패: %v", err)
 	}
-	
+
 	conn, _, err := dialer.Dial(u.String(), nil)
 	if err != nil {
 		return fmt.Errorf("WebSocket 연결 실패: %v", err)
 	}
-	
+
 	bc.mu.Lock()
 	bc.Connection = conn
 	bc.IsActive = true
 	bc.LastMessageTime = time.Now()
 	bc.mu.Unlock()
-	
+
 	log.Printf("🔌 %s %s WebSocket 연결 성공: %s", bc.Exchange, bc.MarketType, endpoint)
 	return nil
 }
@@ -178,16 +178,16 @@ func (bc *BaseConnector) connectWebSocket(endpoint string) error {
 func (bc *BaseConnector) sendMessage(message interface{}) error {
 	bc.mu.RLock()
 	defer bc.mu.RUnlock()
-	
+
 	if !bc.IsActive || bc.Connection == nil {
 		return fmt.Errorf("연결되지 않음")
 	}
-	
+
 	data, err := json.Marshal(message)
 	if err != nil {
 		return fmt.Errorf("JSON 마샬링 실패: %v", err)
 	}
-	
+
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("⚠️ %s %s sendMessage panic recovered: %v", bc.Exchange, bc.MarketType, r)
@@ -199,11 +199,11 @@ func (bc *BaseConnector) sendMessage(message interface{}) error {
 			}
 		}
 	}()
-	
+
 	if err := bc.Connection.WriteMessage(websocket.TextMessage, data); err != nil {
 		return fmt.Errorf("메시지 전송 실패: %v", err)
 	}
-	
+
 	return nil
 }
 
@@ -232,7 +232,7 @@ func (bc *BaseConnector) readMessage() ([]byte, error) {
 			}
 		}
 	}()
-	
+
 	messageType, message, err := conn.ReadMessage()
 	if err != nil {
 		return nil, fmt.Errorf("메시지 읽기 실패: %v", err)
@@ -247,7 +247,7 @@ func (bc *BaseConnector) readMessage() ([]byte, error) {
 	bc.LastMessageTime = time.Now()
 	bc.TotalMessages++
 	bc.mu.Unlock()
-	
+
 	return message, nil
 }
 
@@ -256,7 +256,7 @@ func (bc *BaseConnector) startPingLoop(ctx context.Context, interval time.Durati
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -266,7 +266,7 @@ func (bc *BaseConnector) startPingLoop(ctx context.Context, interval time.Durati
 				isConnected := bc.IsActive && bc.Connection != nil
 				conn := bc.Connection
 				bc.mu.RUnlock()
-				
+
 				if isConnected && conn != nil {
 					func() {
 						defer func() {
@@ -282,7 +282,7 @@ func (bc *BaseConnector) startPingLoop(ctx context.Context, interval time.Durati
 								}
 							}
 						}()
-						
+
 						if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 							log.Printf("⚠️ %s %s Ping 전송 실패: %v", bc.Exchange, bc.MarketType, err)
 							if bc.OnError != nil {
@@ -299,7 +299,7 @@ func (bc *BaseConnector) startPingLoop(ctx context.Context, interval time.Durati
 // chunkSymbols는 심볼을 연결 제한에 따라 청크로 분할
 func (bc *BaseConnector) chunkSymbols(symbols []string, maxPerChunk int) [][]string {
 	var chunks [][]string
-	
+
 	for i := 0; i < len(symbols); i += maxPerChunk {
 		end := i + maxPerChunk
 		if end > len(symbols) {
@@ -307,7 +307,7 @@ func (bc *BaseConnector) chunkSymbols(symbols []string, maxPerChunk int) [][]str
 		}
 		chunks = append(chunks, symbols[i:end])
 	}
-	
+
 	return chunks
 }
 
@@ -333,14 +333,14 @@ func createSubscriptionMessage(method string, params interface{}, id int) Subscr
 // formatSymbol은 거래소별 심볼 형식 변환
 func formatSymbol(symbol, exchange, marketType string) string {
 	symbol = strings.ToUpper(symbol)
-	
+
 	switch exchange {
 	case "binance":
 		return strings.ToLower(symbol) // binance는 소문자
 	case "bybit":
 		return symbol // bybit은 대문자
 	case "kucoin":
-		if strings.Contains(symbol, "USDT") {
+		if strings.Contains(symbol, "USDT") && !strings.Contains(symbol, "-USDT") {
 			return strings.Replace(symbol, "USDT", "-USDT", -1)
 		}
 		return symbol
@@ -354,7 +354,11 @@ func formatSymbol(symbol, exchange, marketType string) string {
 	case "phemex":
 		return symbol // phemex는 대문자
 	case "gate":
-		return strings.ToLower(strings.Replace(symbol, "USDT", "_usdt", -1))
+		symbol = strings.ToUpper(symbol) // Gate.io uses uppercase symbols
+		if strings.Contains(symbol, "USDT") && !strings.Contains(symbol, "_USDT") {
+			return strings.Replace(symbol, "USDT", "_USDT", -1)
+		}
+		return symbol
 	default:
 		return symbol
 	}
@@ -369,25 +373,50 @@ func normalizeSymbol(symbol string) string {
 	return symbol
 }
 
-// ConnectorFactory는 거래소별 Connector 생성 함수
+// ConnectorFactory는 커넥터 생성자 함수 타입
 type ConnectorFactory func(marketType string, maxSymbols int) WebSocketConnector
 
-// GetConnectorFactory는 거래소별 Connector Factory 반환
-func GetConnectorFactory(exchange string) (ConnectorFactory, error) {
-	switch exchange {
-	case "binance":
-		return NewBinanceConnector, nil
-	case "bybit":
-		return NewBybitConnector, nil
-	case "kucoin":
-		return NewKuCoinConnector, nil
-	case "okx":
-		return NewOKXConnector, nil
-	case "phemex":
-		return NewPhemexConnector, nil
-	case "gate":
-		return NewGateConnector, nil
-	default:
-		return nil, fmt.Errorf("지원하지 않는 거래소: %s", exchange)
+// 커넥터 레지스트리
+var connectorRegistry = make(map[string]ConnectorFactory)
+var registryMutex sync.RWMutex
+
+// init 함수에서 기본 커넥터들 등록
+func init() {
+	RegisterConnector("binance", NewBinanceConnector)
+	RegisterConnector("bybit", NewBybitConnector)
+	RegisterConnector("kucoin", NewKuCoinConnector)
+	RegisterConnector("okx", NewOKXConnector)
+	RegisterConnector("phemex", NewPhemexConnector)
+	RegisterConnector("gate", NewGateConnector)
+}
+
+// RegisterConnector는 새로운 커넥터를 레지스트리에 등록
+func RegisterConnector(exchange string, factory ConnectorFactory) {
+	registryMutex.Lock()
+	defer registryMutex.Unlock()
+	connectorRegistry[exchange] = factory
+}
+
+// GetRegisteredExchanges는 등록된 거래소 목록 반환
+func GetRegisteredExchanges() []string {
+	registryMutex.RLock()
+	defer registryMutex.RUnlock()
+
+	exchanges := make([]string, 0, len(connectorRegistry))
+	for exchange := range connectorRegistry {
+		exchanges = append(exchanges, exchange)
 	}
+	return exchanges
+}
+
+// GetConnectorFactory는 거래소별 Connector Factory 반환 (레지스트리 기반)
+func GetConnectorFactory(exchange string) (ConnectorFactory, error) {
+	registryMutex.RLock()
+	defer registryMutex.RUnlock()
+
+	factory, exists := connectorRegistry[exchange]
+	if !exists {
+		return nil, fmt.Errorf("지원하지 않는 거래소: %s (지원 가능: %v)", exchange, GetRegisteredExchanges())
+	}
+	return factory, nil
 }

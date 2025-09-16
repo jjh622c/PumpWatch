@@ -7,10 +7,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"PumpWatch/internal/logging"
 	"PumpWatch/internal/models"
 	"PumpWatch/internal/websocket/connectors"
+	"github.com/gorilla/websocket"
 )
 
 // SafeWorker는 메모리 누수 없는 단일 고루틴 워커
@@ -32,8 +32,8 @@ type SafeWorker struct {
 	connected bool
 
 	// 통합 채널들 (백프레셔 처리)
-	messageChan chan []byte              // WebSocket 원시 메시지
-	tradeChan   chan models.TradeEvent   // 파싱된 거래 데이터
+	messageChan chan []byte            // WebSocket 원시 메시지
+	tradeChan   chan models.TradeEvent // 파싱된 거래 데이터
 
 	// 타이머들 (통합 루프에서 관리)
 	pingTicker     *time.Ticker
@@ -80,7 +80,7 @@ func NewSafeWorker(id int, exchange, marketType string, symbols []string, connec
 		cancel:     cancel,
 
 		// 백프레셔 처리를 위한 버퍼 크기
-		messageChan: make(chan []byte, 2000),    // 원시 메시지용
+		messageChan: make(chan []byte, 2000),              // 원시 메시지용
 		tradeChan:   make(chan models.TradeEvent, 500000), // 거래 데이터용 - 상장 펌핑 대응
 
 		connector: connector,

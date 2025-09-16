@@ -20,36 +20,36 @@ import (
 // TaskManager manages WebSocket connections for all exchanges and markets
 // Enhanced with intelligent error recovery system
 type TaskManager struct {
-	ctx             context.Context
-	cancel          context.CancelFunc
-	
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	// Configuration
 	exchangesConfig config.ExchangesConfig
 	symbolsConfig   *symbols.SymbolsConfig
 	storageManager  *storage.Manager
 	pumpAnalyzer    *analyzer.PumpAnalyzer
-	
+
 	// Connection management - 12 independent connections
-	connections     map[string]*ConnectionManager
-	connectionsMu   sync.RWMutex
-	
+	connections   map[string]*ConnectionManager
+	connectionsMu sync.RWMutex
+
 	// Intelligent error recovery system
 	recoveryScheduler *recovery.ReconnectionScheduler
-	logger           *logging.Logger
-	
+	logger            *logging.Logger
+
 	// Data collection
 	currentCollection *models.CollectionEvent
 	collectionMu      sync.RWMutex
 	collectionTimer   *time.Timer
-	
+
 	// Status tracking
-	stats           TaskManagerStats
-	statsMu         sync.RWMutex
-	
+	stats   TaskManagerStats
+	statsMu sync.RWMutex
+
 	// Health monitoring
-	healthTicker    *time.Ticker
-	running         bool
-	runningMu       sync.RWMutex
+	healthTicker *time.Ticker
+	running      bool
+	runningMu    sync.RWMutex
 }
 
 // TaskManagerStats holds task manager statistics
@@ -65,20 +65,20 @@ type TaskManagerStats struct {
 
 // ConnectionManager manages individual exchange-market connections
 type ConnectionManager struct {
-	Exchange        string
-	MarketType      string
-	Connector       connectors.WebSocketConnector
-	Symbols         []string
-	Status          ConnectionStatus
-	LastError       error
-	RetryCount      int
-	MaxRetries      int
-	LastReconnect   time.Time
-	LastMessage     time.Time
-	MessageCount    int64
-	ctx             context.Context
-	cancel          context.CancelFunc
-	mu              sync.RWMutex
+	Exchange      string
+	MarketType    string
+	Connector     connectors.WebSocketConnector
+	Symbols       []string
+	Status        ConnectionStatus
+	LastError     error
+	RetryCount    int
+	MaxRetries    int
+	LastReconnect time.Time
+	LastMessage   time.Time
+	MessageCount  int64
+	ctx           context.Context
+	cancel        context.CancelFunc
+	mu            sync.RWMutex
 }
 
 // ConnectionStatus represents connection state
@@ -112,7 +112,7 @@ func (cs ConnectionStatus) String() string {
 // NewTaskManager creates a new WebSocket task manager with intelligent error recovery
 func NewTaskManager(ctx context.Context, exchangesConfig config.ExchangesConfig, symbolsConfig *symbols.SymbolsConfig, storageManager *storage.Manager) (*TaskManager, error) {
 	taskCtx, cancel := context.WithCancel(ctx)
-	
+
 	tm := &TaskManager{
 		ctx:             taskCtx,
 		cancel:          cancel,
@@ -126,15 +126,15 @@ func NewTaskManager(ctx context.Context, exchangesConfig config.ExchangesConfig,
 			LastHealthCheck: time.Now(),
 		},
 	}
-	
+
 	// Initialize intelligent error recovery system
 	tm.recoveryScheduler = recovery.NewReconnectionScheduler(taskCtx)
-	
+
 	// Initialize all 12 connection managers
 	if err := tm.initializeConnections(); err != nil {
 		return nil, fmt.Errorf("failed to initialize connections: %w", err)
 	}
-	
+
 	return tm, nil
 }
 
@@ -142,53 +142,53 @@ func NewTaskManager(ctx context.Context, exchangesConfig config.ExchangesConfig,
 func (tm *TaskManager) initializeConnections() error {
 	exchanges := []string{"binance", "bybit", "okx", "kucoin", "phemex", "gate"}
 	markets := []string{"spot", "futures"}
-	
+
 	for _, exchange := range exchanges {
 		exchangeConfig := tm.getExchangeConfig(exchange)
 		if exchangeConfig == nil {
 			log.Printf("⚠️ Exchange configuration not found: %s", exchange)
 			continue
 		}
-		
+
 		for _, market := range markets {
 			connID := fmt.Sprintf("%s_%s", exchange, market)
-			
+
 			// Create connector based on exchange
 			connector, err := tm.createConnector(exchange, market, *exchangeConfig)
 			if err != nil {
 				log.Printf("❌ Failed to create connector for %s: %v", connID, err)
 				continue
 			}
-			
+
 			// Set up error callback for intelligent recovery
 			tm.setConnectorCallbacks(connector, exchange, market)
-			
+
 			// Get symbols for this exchange-market combination
 			symbols := tm.getSymbolsForExchangeMarket(exchange, market)
-			
+
 			// Create connection manager
 			connCtx, connCancel := context.WithCancel(tm.ctx)
 			cm := &ConnectionManager{
-				Exchange:     exchange,
-				MarketType:   market,
-				Connector:    connector,
-				Symbols:      symbols,
-				Status:       StatusDisconnected,
-				MaxRetries:   exchangeConfig.MaxRetries,
-				LastMessage:  time.Now(),
-				ctx:          connCtx,
-				cancel:       connCancel,
+				Exchange:    exchange,
+				MarketType:  market,
+				Connector:   connector,
+				Symbols:     symbols,
+				Status:      StatusDisconnected,
+				MaxRetries:  exchangeConfig.MaxRetries,
+				LastMessage: time.Now(),
+				ctx:         connCtx,
+				cancel:      connCancel,
 			}
-			
+
 			tm.connections[connID] = cm
-			
+
 			// Register with intelligent recovery system
 			tm.recoveryScheduler.RegisterExchange(exchange, market, tm.createReconnectCallback(connID))
-			
+
 			log.Printf("🔗 Initialized connection: %s (%d symbols)", connID, len(symbols))
 		}
 	}
-	
+
 	log.Printf("✅ Initialized %d connection managers", len(tm.connections))
 	return nil
 }
@@ -199,7 +199,7 @@ func (tm *TaskManager) createConnector(exchange, market string, exchangeConfig c
 	if maxSymbols == 0 {
 		maxSymbols = 100 // Default value
 	}
-	
+
 	switch exchange {
 	case "binance":
 		return connectors.NewBinanceConnector(market, maxSymbols), nil
@@ -221,12 +221,12 @@ func (tm *TaskManager) createConnector(exchange, market string, exchangeConfig c
 // getSymbolsForExchangeMarket returns filtered symbols for specific exchange-market
 func (tm *TaskManager) getSymbolsForExchangeMarket(exchange, market string) []string {
 	subscriptionKey := fmt.Sprintf("%s_%s", exchange, market)
-	
+
 	if symbols, exists := tm.symbolsConfig.SubscriptionLists[subscriptionKey]; exists {
 		log.Printf("📊 %s symbols: %d", subscriptionKey, len(symbols))
 		return symbols
 	}
-	
+
 	// Fallback to default symbols if subscription list not found
 	defaultSymbols := []string{"BTCUSDT", "ETHUSDT", "SOLUSDT"}
 	log.Printf("⚠️ Using default symbols for %s: %v", subscriptionKey, defaultSymbols)
@@ -237,29 +237,29 @@ func (tm *TaskManager) getSymbolsForExchangeMarket(exchange, market string) []st
 func (tm *TaskManager) Start() error {
 	tm.runningMu.Lock()
 	defer tm.runningMu.Unlock()
-	
+
 	if tm.running {
 		return fmt.Errorf("task manager is already running")
 	}
-	
+
 	tm.running = true
-	
+
 	// Start intelligent error recovery system
 	if err := tm.recoveryScheduler.Start(); err != nil {
 		return fmt.Errorf("failed to start recovery scheduler: %w", err)
 	}
-	
+
 	// Start health monitoring (45초 간격으로 ping과 겹치지 않게)
 	tm.healthTicker = time.NewTicker(45 * time.Second)
 	go tm.healthCheckWorker()
-	
+
 	// Start all connections
 	tm.connectionsMu.RLock()
 	for connID, cm := range tm.connections {
 		go tm.startConnection(connID, cm)
 	}
 	tm.connectionsMu.RUnlock()
-	
+
 	tm.logger.Info("🚀 WebSocket Task Manager started with %d connections + intelligent recovery", len(tm.connections))
 	return nil
 }
@@ -268,28 +268,28 @@ func (tm *TaskManager) Start() error {
 func (tm *TaskManager) Stop() error {
 	tm.runningMu.Lock()
 	defer tm.runningMu.Unlock()
-	
+
 	if !tm.running {
 		return nil
 	}
-	
+
 	tm.running = false
-	
+
 	// Stop intelligent error recovery system
 	if tm.recoveryScheduler != nil {
 		tm.recoveryScheduler.Stop()
 	}
-	
+
 	// Stop health monitoring
 	if tm.healthTicker != nil {
 		tm.healthTicker.Stop()
 	}
-	
+
 	// Stop collection timer if active
 	if tm.collectionTimer != nil {
 		tm.collectionTimer.Stop()
 	}
-	
+
 	// Stop all connections
 	tm.connectionsMu.Lock()
 	for connID, cm := range tm.connections {
@@ -300,10 +300,10 @@ func (tm *TaskManager) Stop() error {
 		}
 	}
 	tm.connectionsMu.Unlock()
-	
+
 	// Cancel main context
 	tm.cancel()
-	
+
 	log.Printf("✅ WebSocket Task Manager stopped")
 	return nil
 }
@@ -317,14 +317,14 @@ func (tm *TaskManager) startConnection(connID string, cm *ConnectionManager) {
 			return
 		default:
 		}
-		
+
 		// Update status
 		cm.mu.Lock()
 		cm.Status = StatusConnecting
 		cm.mu.Unlock()
-		
+
 		log.Printf("🔌 Connecting to %s...", connID)
-		
+
 		// Attempt connection
 		err := cm.Connector.Connect(cm.ctx, cm.Symbols)
 		if err != nil {
@@ -332,31 +332,31 @@ func (tm *TaskManager) startConnection(connID string, cm *ConnectionManager) {
 			tm.handleConnectionError(connID, cm, err)
 			continue
 		}
-		
+
 		// Connection successful
 		cm.mu.Lock()
 		cm.Status = StatusConnected
 		cm.RetryCount = 0
 		cm.LastMessage = time.Now()
 		cm.mu.Unlock()
-		
+
 		// Notify recovery system of successful connection
 		tm.recoveryScheduler.MarkHealthy(cm.Exchange, cm.MarketType)
-		
+
 		logging.LogWebSocketEvent(cm.Exchange, cm.MarketType, "Connected", "Connection established successfully")
-		
+
 		// Start message processing
 		tm.processMessages(connID, cm)
-		
+
 		// If we reach here, the message processing has ended (connection lost)
-		
+
 		// Connection lost, prepare for reconnection
 		cm.mu.Lock()
 		cm.Status = StatusReconnecting
 		cm.mu.Unlock()
-		
+
 		log.Printf("🔄 Connection lost, will reconnect: %s", connID)
-		
+
 		// Wait before reconnection
 		select {
 		case <-cm.ctx.Done():
@@ -370,7 +370,7 @@ func (tm *TaskManager) startConnection(connID string, cm *ConnectionManager) {
 func (tm *TaskManager) processMessages(connID string, cm *ConnectionManager) {
 	// Create channel for receiving trade events from connector
 	messageChan := make(chan models.TradeEvent, 1000)
-	
+
 	// Start the connector's message loop
 	go func() {
 		err := cm.Connector.StartMessageLoop(cm.ctx, messageChan)
@@ -380,7 +380,7 @@ func (tm *TaskManager) processMessages(connID string, cm *ConnectionManager) {
 			tm.recoveryScheduler.HandleError(cm.Exchange, cm.MarketType, err)
 		}
 	}()
-	
+
 	// Process messages from the channel
 	for {
 		select {
@@ -392,11 +392,11 @@ func (tm *TaskManager) processMessages(connID string, cm *ConnectionManager) {
 			cm.MessageCount++
 			cm.LastMessage = time.Now()
 			cm.mu.Unlock()
-			
+
 			tm.statsMu.Lock()
 			tm.stats.TotalMessagesReceived++
 			tm.statsMu.Unlock()
-			
+
 			// Store message if collection is active
 			tm.collectionMu.RLock()
 			if tm.currentCollection != nil {
@@ -412,7 +412,7 @@ func (tm *TaskManager) storeTradeEvent(connID string, tradeEvent *models.TradeEv
 	if tm.currentCollection == nil {
 		return
 	}
-	
+
 	// Store in appropriate slice based on connection ID
 	switch connID {
 	case "binance_spot":
@@ -448,12 +448,12 @@ func (tm *TaskManager) handleConnectionError(connID string, cm *ConnectionManage
 	cm.LastError = err
 	cm.Status = StatusReconnecting
 	cm.mu.Unlock()
-	
+
 	// Use intelligent error recovery system instead of simple retry logic
 	tm.recoveryScheduler.HandleError(cm.Exchange, cm.MarketType, err)
-	
+
 	tm.logger.Warn("🔄 Connection error handled by recovery system: %s - %v", connID, err)
-	
+
 	// Update stats
 	tm.statsMu.Lock()
 	tm.stats.ReconnectingConnections++
@@ -464,30 +464,30 @@ func (tm *TaskManager) handleConnectionError(connID string, cm *ConnectionManage
 func (tm *TaskManager) StartDataCollection(symbol string, triggerTime time.Time) error {
 	tm.collectionMu.Lock()
 	defer tm.collectionMu.Unlock()
-	
+
 	if tm.currentCollection != nil {
 		return fmt.Errorf("data collection already active for symbol: %s", tm.currentCollection.Symbol)
 	}
-	
+
 	// Calculate collection window (-20 seconds to +20 seconds)
 	collectionStart := triggerTime.Add(-20 * time.Second)
 	collectionEnd := triggerTime.Add(20 * time.Second)
-	
+
 	// Create new collection event
 	tm.currentCollection = models.NewCollectionEvent(symbol, triggerTime)
-	
+
 	log.Printf("📡 Starting data collection for %s", symbol)
-	log.Printf("⏰ Collection window: %s to %s (40 seconds)", 
+	log.Printf("⏰ Collection window: %s to %s (40 seconds)",
 		collectionStart.Format("15:04:05"), collectionEnd.Format("15:04:05"))
-	
+
 	// Schedule collection completion
 	tm.scheduleCollectionCompletion(collectionEnd)
-	
+
 	tm.statsMu.Lock()
 	tm.stats.LastDataCollection = time.Now()
 	tm.stats.CollectionActive = true
 	tm.statsMu.Unlock()
-	
+
 	return nil
 }
 
@@ -499,7 +499,7 @@ func (tm *TaskManager) scheduleCollectionCompletion(endTime time.Time) {
 		go tm.completeDataCollection()
 		return
 	}
-	
+
 	tm.collectionTimer = time.AfterFunc(duration, func() {
 		tm.completeDataCollection()
 	})
@@ -509,30 +509,30 @@ func (tm *TaskManager) scheduleCollectionCompletion(endTime time.Time) {
 func (tm *TaskManager) completeDataCollection() {
 	tm.collectionMu.Lock()
 	defer tm.collectionMu.Unlock()
-	
+
 	if tm.currentCollection == nil {
 		return
 	}
-	
+
 	collectionEvent := tm.currentCollection
 	tm.currentCollection = nil
-	
+
 	tm.statsMu.Lock()
 	tm.stats.CollectionActive = false
 	tm.statsMu.Unlock()
-	
+
 	log.Printf("✅ Data collection completed for %s", collectionEvent.Symbol)
 	log.Printf("📊 Total trades collected: %d", collectionEvent.GetTotalTradeCount())
-	
+
 	// Store collection event (raw data)
 	if err := tm.storageManager.StoreCollectionEvent(collectionEvent); err != nil {
 		log.Printf("❌ Failed to store collection event: %v", err)
 	}
-	
+
 	// Analyze for pump events
 	if collectionEvent.GetTotalTradeCount() > 0 {
 		log.Printf("🔍 Starting pump analysis for %s...", collectionEvent.Symbol)
-		
+
 		pumpAnalysis, err := tm.pumpAnalyzer.AnalyzePumps(collectionEvent)
 		if err != nil {
 			log.Printf("❌ Pump analysis failed: %v", err)
@@ -541,14 +541,14 @@ func (tm *TaskManager) completeDataCollection() {
 			if err := tm.storageManager.StorePumpAnalysis(collectionEvent.Symbol, collectionEvent.TriggerTime, pumpAnalysis); err != nil {
 				log.Printf("❌ Failed to store pump analysis: %v", err)
 			} else {
-				log.Printf("💾 Stored pump analysis: %d pump events, max change: %.2f%%", 
+				log.Printf("💾 Stored pump analysis: %d pump events, max change: %.2f%%",
 					len(pumpAnalysis.PumpEvents), pumpAnalysis.Summary.MaxPriceChange)
 			}
 		} else {
 			log.Printf("📈 No significant pump events detected for %s", collectionEvent.Symbol)
 		}
 	}
-	
+
 	// Clear collection timer
 	if tm.collectionTimer != nil {
 		tm.collectionTimer.Stop()
@@ -576,23 +576,23 @@ func (tm *TaskManager) performHealthCheck() {
 	tm.stats.ReconnectingConnections = 0
 	tm.stats.FailedConnections = 0
 	tm.statsMu.Unlock()
-	
+
 	tm.connectionsMu.RLock()
 	for connID, cm := range tm.connections {
 		cm.mu.RLock()
 		status := cm.Status
 		lastMessage := cm.LastMessage
 		cm.mu.RUnlock()
-		
+
 		// Check if connection is stale (no messages for 90 seconds)
 		if status == StatusConnected && time.Since(lastMessage) > 90*time.Second {
-			log.Printf("⚠️ Stale connection detected: %s (last message: %v ago)", 
+			log.Printf("⚠️ Stale connection detected: %s (last message: %v ago)",
 				connID, time.Since(lastMessage))
-			
+
 			// Force reconnection
 			cm.cancel()
 		}
-		
+
 		// Update stats
 		tm.statsMu.Lock()
 		switch status {
@@ -606,8 +606,8 @@ func (tm *TaskManager) performHealthCheck() {
 		tm.statsMu.Unlock()
 	}
 	tm.connectionsMu.RUnlock()
-	
-	log.Printf("💗 Health check - Active: %d, Reconnecting: %d, Failed: %d", 
+
+	log.Printf("💗 Health check - Active: %d, Reconnecting: %d, Failed: %d",
 		tm.stats.ActiveConnections, tm.stats.ReconnectingConnections, tm.stats.FailedConnections)
 }
 
@@ -622,14 +622,14 @@ func (tm *TaskManager) GetStats() TaskManagerStats {
 func (tm *TaskManager) GetConnectionStatuses() map[string]ConnectionStatus {
 	tm.connectionsMu.RLock()
 	defer tm.connectionsMu.RUnlock()
-	
+
 	statuses := make(map[string]ConnectionStatus)
 	for connID, cm := range tm.connections {
 		cm.mu.RLock()
 		statuses[connID] = cm.Status
 		cm.mu.RUnlock()
 	}
-	
+
 	return statuses
 }
 
@@ -659,18 +659,18 @@ func (tm *TaskManager) createReconnectCallback(connID string) func(string, strin
 		tm.connectionsMu.RLock()
 		cm, exists := tm.connections[connID]
 		tm.connectionsMu.RUnlock()
-		
+
 		if !exists {
 			return fmt.Errorf("connection manager not found for %s", connID)
 		}
-		
+
 		tm.logger.Info("🔄 Attempting intelligent reconnection for %s", connID)
-		
+
 		// Disconnect existing connection if any
 		if cm.Connector != nil {
 			cm.Connector.Disconnect()
 		}
-		
+
 		// Create new context for this connection attempt
 		connCtx, connCancel := context.WithCancel(tm.ctx)
 		cm.mu.Lock()
@@ -682,7 +682,7 @@ func (tm *TaskManager) createReconnectCallback(connID string) func(string, strin
 		cm.cancel = connCancel
 		cm.Status = StatusConnecting
 		cm.mu.Unlock()
-		
+
 		// Attempt reconnection
 		err := cm.Connector.Connect(cm.ctx, cm.Symbols)
 		if err != nil {
@@ -692,7 +692,7 @@ func (tm *TaskManager) createReconnectCallback(connID string) func(string, strin
 			cm.mu.Unlock()
 			return fmt.Errorf("reconnection failed: %w", err)
 		}
-		
+
 		// Success
 		cm.mu.Lock()
 		cm.Status = StatusConnected
@@ -700,15 +700,15 @@ func (tm *TaskManager) createReconnectCallback(connID string) func(string, strin
 		cm.LastError = nil
 		cm.LastMessage = time.Now()
 		cm.mu.Unlock()
-		
+
 		// Initialize logger for connector
 		if baseConnector, ok := cm.Connector.(interface{ InitLogger() }); ok {
 			baseConnector.InitLogger()
 		}
-		
+
 		// Restart message processing
 		go tm.processMessages(connID, cm)
-		
+
 		tm.logger.Info("✅ Intelligent reconnection successful for %s", connID)
 		return nil
 	}
@@ -717,7 +717,7 @@ func (tm *TaskManager) createReconnectCallback(connID string) func(string, strin
 // setConnectorCallbacks sets up OnError callback for intelligent recovery
 func (tm *TaskManager) setConnectorCallbacks(connector connectors.WebSocketConnector, exchange, marketType string) {
 	// Convert to base connector to access callbacks
-	if baseConnector, ok := connector.(interface{
+	if baseConnector, ok := connector.(interface {
 		SetOnError(func(error))
 	}); ok {
 		baseConnector.SetOnError(func(err error) {

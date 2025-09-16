@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"PumpWatch/internal/analyzer"
 	"PumpWatch/internal/config"
 	"PumpWatch/internal/logging"
 	"PumpWatch/internal/monitor"
@@ -25,38 +26,38 @@ const (
 )
 
 var (
-	configPath   = flag.String("config", "config/config.yaml", "Configuration file path")
-	symbolsPath  = flag.String("symbols", "config/symbols/symbols.yaml", "Symbols configuration file path") 
-	initSymbols  = flag.Bool("init-symbols", false, "Initialize symbols configuration")
-	logLevel     = flag.String("log", "info", "Log level (debug, info, warn, error)")
+	configPath  = flag.String("config", "config/config.yaml", "Configuration file path")
+	symbolsPath = flag.String("symbols", "config/symbols/symbols.yaml", "Symbols configuration file path")
+	initSymbols = flag.Bool("init-symbols", false, "Initialize symbols configuration")
+	logLevel    = flag.String("log", "info", "Log level (debug, info, warn, error)")
 )
 
 func main() {
 	flag.Parse()
-	
+
 	printBanner()
-	
+
 	// Initialize comprehensive logging system
 	if err := logging.InitGlobalLogger("metdc", *logLevel, "logs"); err != nil {
 		fmt.Printf("❌ Failed to initialize logging: %v\n", err)
 		os.Exit(1)
 	}
 	defer logging.CloseGlobalLogger()
-	
+
 	logging.Info("🚀 METDC v%s starting up...", Version)
-	
+
 	// Context with cancellation for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	
+
 	// Load system configuration
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		logging.Fatal("Failed to load configuration: %v", err)
 	}
-	
+
 	logging.Info("Configuration loaded from %s", *configPath)
-	
+
 	// Initialize or load symbols configuration
 	if *initSymbols {
 		logging.Info("🔧 Initializing symbols configuration...")
@@ -66,20 +67,27 @@ func main() {
 		logging.Info("✅ Symbols configuration initialized")
 		return
 	}
-	
+
 	// Load symbols configuration
 	symbolsConfig, err := symbols.LoadConfig(*symbolsPath)
 	if err != nil {
 		logging.Fatal("❌ Failed to load symbols configuration: %v", err)
 	}
-	
-	logging.Info("✅ Symbols configuration loaded: %d exchanges configured", 
+
+	logging.Info("✅ Symbols configuration loaded: %d exchanges configured",
 		len(symbolsConfig.Exchanges))
-	
+
 	// Initialize storage manager
-	storageManager := storage.NewManager(cfg.Storage)
+	storageManager := storage.NewManager(cfg.Storage, cfg.Analysis)
 	logging.Info("✅ Storage manager initialized")
-	
+
+	// Initialize and set pump analyzer (if analysis is enabled)
+	if cfg.Analysis.Enabled {
+		analyzer := analyzer.NewPumpAnalyzer()
+		storageManager.SetAnalyzer(analyzer)
+		logging.Info("✅ Pump analyzer initialized and connected to storage manager")
+	}
+
 	// Initialize EnhancedTaskManager - Complete Data Collection Architecture
 	taskManager, err := websocket.NewEnhancedTaskManager(ctx, cfg.Exchanges, symbolsConfig, storageManager)
 	if err != nil {
@@ -87,73 +95,73 @@ func main() {
 	}
 
 	logging.Info("✅ EnhancedTaskManager initialized - 완전한 20초 타이머 데이터 수집 아키텍처")
-	
+
 	// Start WebSocket Task Manager
 	if err := taskManager.Start(); err != nil {
 		logging.Fatal("❌ Failed to start WebSocket Task Manager: %v", err)
 	}
-	
+
 	logging.Info("🚀 EnhancedTaskManager started - 완전한 데이터 수집 및 20초 타이머 아키텍처")
-	
+
 	// Initialize Upbit Monitor
 	upbitMonitor, err := monitor.NewUpbitMonitor(ctx, cfg.Upbit, taskManager, storageManager)
 	if err != nil {
 		logging.Fatal("❌ Failed to initialize Upbit Monitor: %v", err)
 	}
-	
+
 	logging.Info("✅ Upbit Monitor initialized")
-	
+
 	// Start Upbit monitoring (5-second polling)
 	if err := upbitMonitor.Start(); err != nil {
 		logging.Fatal("❌ Failed to start Upbit Monitor: %v", err)
 	}
-	
+
 	logging.Info("📡 Upbit Monitor started - polling every %v", cfg.Upbit.PollInterval)
 	logging.Info("🎯 System ready - monitoring for Upbit KRW listing announcements...")
-	
+
 	// System status reporting
 	go systemStatusReporter(ctx, upbitMonitor)
-	
+
 	// Wait for shutdown signal
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	
+
 	select {
 	case sig := <-sigChan:
 		logging.Info("📥 Received signal: %v", sig)
 	case <-ctx.Done():
 		logging.Info("📥 Context cancelled")
 	}
-	
+
 	// Graceful shutdown
 	logging.Info("🛑 Initiating graceful shutdown...")
-	
+
 	// Stop components in reverse order
 	shutdownTimeout := 30 * time.Second
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
-	
+
 	// Stop Upbit Monitor first
 	if err := upbitMonitor.Stop(shutdownCtx); err != nil {
 		logging.Warn(" Error stopping Upbit Monitor: %v", err)
 	} else {
 		logging.Info("✅ Upbit Monitor stopped")
 	}
-	
+
 	// Stop WebSocket Task Manager
 	if err := taskManager.Stop(); err != nil {
 		logging.Warn(" Error stopping WebSocket Task Manager: %v", err)
 	} else {
 		logging.Info("✅ WebSocket Task Manager stopped")
 	}
-	
+
 	// Cleanup storage if needed
 	if err := storageManager.Close(); err != nil {
 		logging.Warn(" Error closing storage manager: %v", err)
 	} else {
 		logging.Info("✅ Storage manager closed")
 	}
-	
+
 	logging.Info("👋 METDC v2.0 shutdown complete")
 }
 
@@ -176,17 +184,17 @@ func initializeSymbols(path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create symbols manager: %w", err)
 	}
-	
+
 	// Update symbols from all exchanges
 	if err := symbolsManager.UpdateFromExchanges(); err != nil {
 		return fmt.Errorf("failed to update symbols from exchanges: %w", err)
 	}
-	
+
 	// Save to YAML file
 	if err := symbolsManager.SaveToFile(path); err != nil {
 		return fmt.Errorf("failed to save symbols config: %w", err)
 	}
-	
+
 	return nil
 }
 
