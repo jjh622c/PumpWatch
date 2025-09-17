@@ -369,7 +369,7 @@ func (tm *TaskManager) startConnection(connID string, cm *ConnectionManager) {
 // processMessages processes incoming WebSocket messages using the existing connector interface
 func (tm *TaskManager) processMessages(connID string, cm *ConnectionManager) {
 	// Create channel for receiving trade events from connector
-	messageChan := make(chan models.TradeEvent, 1000)
+	messageChan := make(chan models.TradeEvent, 500000) // 상장 펌핑 대응을 위한 대용량 버퍼
 
 	// Start the connector's message loop
 	go func() {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"PumpWatch/internal/analyzer"
+	"PumpWatch/internal/buffer"
 	"PumpWatch/internal/config"
 	"PumpWatch/internal/logging"
 	"PumpWatch/internal/models"
@@ -26,6 +27,7 @@ type EnhancedTaskManager struct {
 	symbolsConfig   *symbols.SymbolsConfig
 	storageManager  *storage.Manager
 	pumpAnalyzer    *analyzer.PumpAnalyzer
+	circularBuffer  *buffer.CircularTradeBuffer
 
 	// Multi-worker connection management
 	workerPools map[string]*WorkerPool // key: "exchange_markettype"
@@ -90,6 +92,7 @@ func NewEnhancedTaskManager(ctx context.Context, exchangesConfig config.Exchange
 		symbolsConfig:   symbolsConfig,
 		storageManager:  storageManager,
 		pumpAnalyzer:    analyzer.NewPumpAnalyzer(),
+		circularBuffer:  buffer.NewCircularTradeBuffer(taskCtx),
 		workerPools:     make(map[string]*WorkerPool),
 		logger:          logging.GetGlobalLogger(),
 		stats: EnhancedTaskManagerStats{
@@ -204,6 +207,12 @@ func (tm *EnhancedTaskManager) setupPoolCallbacks(pool *WorkerPool, exchange, ma
 
 // handleTradeEvent processes incoming trade events
 func (tm *EnhancedTaskManager) handleTradeEvent(exchange, marketType string, tradeEvent models.TradeEvent) {
+	// 🔍 SOMI 디버그 로깅 추가
+	if strings.Contains(strings.ToUpper(tradeEvent.Symbol), "SOMI") {
+		tm.logger.Info("🎯 SOMI 거래 이벤트 수신: %s_%s, Symbol: %s, Price: %s, Quantity: %s",
+			exchange, marketType, tradeEvent.Symbol, tradeEvent.Price, tradeEvent.Quantity)
+	}
+
 	// Update statistics
 	tm.statsMu.Lock()
 	tm.stats.TotalMessagesReceived++
@@ -218,6 +227,25 @@ func (tm *EnhancedTaskManager) handleTradeEvent(exchange, marketType string, tra
 	exchangeStats.TotalMessages++
 	tm.stats.ExchangeStats[exchange] = exchangeStats
 	tm.statsMu.Unlock()
+
+	// Always store trade event in CircularTradeBuffer for 20-minute rolling history
+	exchangeKey := fmt.Sprintf("%s_%s", exchange, marketType)
+
+	// 🔍 SOMI 호출 디버깅 (모든 호출 확인)
+	if strings.Contains(strings.ToUpper(tradeEvent.Symbol), "SOMI") && (tradeEvent.Timestamp%1000 == 0) {
+		tm.logger.Info("🔍 [EnhancedTM] Calling CircularBuffer.StoreTradeEvent: %s, Symbol: %s, Timestamp: %d",
+			exchangeKey, tradeEvent.Symbol, tradeEvent.Timestamp)
+	}
+
+	if err := tm.circularBuffer.StoreTradeEvent(exchangeKey, tradeEvent); err != nil {
+		tm.logger.Info("⚠️ Failed to store trade in circular buffer: %v", err)
+	} else {
+		// 🔍 SOMI 저장 디버깅 (샘플링 - 100개 중 1개만)
+		if strings.Contains(strings.ToUpper(tradeEvent.Symbol), "SOMI") && (tradeEvent.Timestamp%100 == 0) {
+			tm.logger.Info("💾 SOMI 데이터 CircularBuffer 저장: %s_%s, Symbol: %s, Timestamp: %d",
+				exchange, marketType, tradeEvent.Symbol, tradeEvent.Timestamp)
+		}
+	}
 
 	// Store trade event if collection is active
 	tm.collectionMu.RLock()
@@ -318,11 +346,24 @@ func (tm *EnhancedTaskManager) Stop() error {
 	}
 	tm.poolsMu.Unlock()
 
+	// Stop circular buffer
+	if tm.circularBuffer != nil {
+		tm.logger.Info("🛑 Closing CircularTradeBuffer")
+		if err := tm.circularBuffer.Close(); err != nil {
+			tm.logger.Error("❌ Failed to close CircularTradeBuffer: %v", err)
+		}
+	}
+
 	// Cancel main context
 	tm.cancel()
 
 	tm.logger.Info("✅ Enhanced Task Manager stopped")
 	return nil
+}
+
+// GetCircularBuffer returns the CircularTradeBuffer instance for external access
+func (tm *EnhancedTaskManager) GetCircularBuffer() *buffer.CircularTradeBuffer {
+	return tm.circularBuffer
 }
 
 // createPoolReconnectCallback creates a reconnection callback for worker pools
@@ -417,8 +458,95 @@ func (tm *EnhancedTaskManager) completeDataCollection() {
 	tm.stats.CollectionActive = false
 	tm.statsMu.Unlock()
 
+	// 🔄 CircularBuffer에서 과거 데이터 추출 (-20초 ~ +20초)
+	tm.logger.Info("🔄 Extracting historical data from CircularBuffer for %s", collectionEvent.Symbol)
+
+	startTime := collectionEvent.TriggerTime.Add(-20 * time.Second)
+	endTime := collectionEvent.TriggerTime.Add(20 * time.Second)
+
+	tm.logger.Info("⏰ Extracting data range: %s ~ %s",
+		startTime.Format("15:04:05"), endTime.Format("15:04:05"))
+
+	// Extract data from CircularBuffer for all exchanges
+	exchangeMarkets := []string{
+		"binance_spot", "binance_futures",
+		"bybit_spot", "bybit_futures",
+		"okx_spot", "okx_futures",
+		"kucoin_spot", "kucoin_futures",
+		"gate_spot", "gate_futures",
+		"phemex_spot", "phemex_futures",
+	}
+
+	totalExtracted := 0
+	for _, exchangeKey := range exchangeMarkets {
+		// 🔍 CircularBuffer 추출 상세 디버깅
+		tm.logger.Info("🔍 [DEBUG] Extracting from %s...", exchangeKey)
+
+		if trades, err := tm.circularBuffer.GetTradeEvents(exchangeKey, startTime, endTime); err == nil {
+			tm.logger.Info("🔍 [DEBUG] %s returned %d total trades", exchangeKey, len(trades))
+
+			extractedCount := 0
+			symbolMatchCount := 0
+
+			// 시간 범위 분석을 위한 변수
+			var earliestTime, latestTime int64 = 0, 0
+			var targetMatches = 0
+
+			for _, trade := range trades {
+				// 전체 데이터 시간 범위 추적
+				if earliestTime == 0 || trade.Timestamp < earliestTime {
+					earliestTime = trade.Timestamp
+				}
+				if trade.Timestamp > latestTime {
+					latestTime = trade.Timestamp
+				}
+
+				// 심볼 매칭 로깅
+				if collectionEvent.IsTargetSymbol(trade.Symbol) {
+					collectionEvent.AddTradeFromBuffer(exchangeKey, trade)
+					extractedCount++
+					symbolMatchCount++
+					targetMatches++
+
+					// 처음 3개만 상세 로그
+					if symbolMatchCount <= 3 {
+						tradeTime := time.UnixMilli(trade.Timestamp)
+						timeDiff := tradeTime.Sub(collectionEvent.TriggerTime).Seconds()
+						tm.logger.Info("🔍 [DEBUG] %s MATCH: %s @ %s (트리거 %+.1f초, price: %s, qty: %s)",
+							exchangeKey, trade.Symbol, tradeTime.Format("15:04:05.000"), timeDiff, trade.Price, trade.Quantity)
+					}
+				}
+			}
+
+			// 시간 범위 요약 로그
+			if len(trades) > 0 {
+				earliestTimeObj := time.UnixMilli(earliestTime)
+				latestTimeObj := time.UnixMilli(latestTime)
+				earliestDiff := earliestTimeObj.Sub(collectionEvent.TriggerTime).Seconds()
+				latestDiff := latestTimeObj.Sub(collectionEvent.TriggerTime).Seconds()
+
+				tm.logger.Info("🔍 [DEBUG] %s 시간범위: %s~%s (트리거 %+.1f~%+.1f초), 타겟매칭: %d/%d",
+					exchangeKey,
+					earliestTimeObj.Format("15:04:05.000"),
+					latestTimeObj.Format("15:04:05.000"),
+					earliestDiff, latestDiff,
+					targetMatches, len(trades))
+			}
+
+			if extractedCount > 0 {
+				tm.logger.Info("📊 Extracted %d %s trades from CircularBuffer (target symbol matches)", extractedCount, exchangeKey)
+				totalExtracted += extractedCount
+			} else {
+				tm.logger.Info("⚠️ [DEBUG] %s: %d total trades, but 0 target symbol matches", exchangeKey, len(trades))
+			}
+		} else {
+			tm.logger.Info("❌ [DEBUG] Failed to extract %s data from CircularBuffer: %v", exchangeKey, err)
+		}
+	}
+
 	tm.logger.Info("✅ Data collection completed for %s", collectionEvent.Symbol)
-	tm.logger.Info("📊 Total trades collected: %d", collectionEvent.GetTotalTradeCount())
+	tm.logger.Info("📊 Total trades extracted from CircularBuffer: %d", totalExtracted)
+	tm.logger.Info("📊 Total trades in collection: %d", collectionEvent.GetTotalTradeCount())
 
 	// Store collection event (raw data)
 	if err := tm.storageManager.StoreCollectionEvent(collectionEvent); err != nil {

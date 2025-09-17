@@ -504,7 +504,7 @@ func (w *Worker) connect() error {
 
 // processMessages processes incoming messages from the connector
 func (w *Worker) processMessages() {
-	messageChan := make(chan models.TradeEvent, 1000)
+	messageChan := make(chan models.TradeEvent, 500000) // 상장 펌핑 대응을 위한 대용량 버퍼
 
 	// Start message loop
 	go func() {

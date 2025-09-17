@@ -68,7 +68,7 @@ func (ce *CollectionEvent) AddTrade(trade TradeEvent) {
 	}
 
 	// 심볼 필터링: 상장 공고된 심볼과 일치하는 거래만 수집
-	if !ce.isTargetSymbol(trade.Symbol) {
+	if !ce.IsTargetSymbol(trade.Symbol) {
 		return
 	}
 
@@ -218,8 +218,8 @@ func (ce *CollectionEvent) getLastTradeTime(spot, futures []TradeEvent) int64 {
 	return lastTime
 }
 
-// isTargetSymbol은 거래 심볼이 상장 공고된 타겟 심볼과 일치하는지 확인
-func (ce *CollectionEvent) isTargetSymbol(tradeSymbol string) bool {
+// IsTargetSymbol은 거래 심볼이 상장 공고된 타겟 심볼과 일치하는지 확인
+func (ce *CollectionEvent) IsTargetSymbol(tradeSymbol string) bool {
 	targetSymbol := strings.ToUpper(ce.Symbol)
 	tradeSymbol = strings.ToUpper(tradeSymbol)
 
@@ -267,4 +267,35 @@ func (ce *CollectionEvent) isTargetSymbol(tradeSymbol string) bool {
 	}
 
 	return false
+}
+
+// AddTradeFromBuffer는 CircularBuffer에서 추출한 거래 데이터를 CollectionEvent에 추가
+func (ce *CollectionEvent) AddTradeFromBuffer(exchangeKey string, trade TradeEvent) {
+	// 거래소별 독립 슬라이스에 직접 추가 - 동시성 문제 없음
+	switch exchangeKey {
+	case "binance_spot":
+		ce.BinanceSpot = append(ce.BinanceSpot, trade)
+	case "binance_futures":
+		ce.BinanceFutures = append(ce.BinanceFutures, trade)
+	case "bybit_spot":
+		ce.BybitSpot = append(ce.BybitSpot, trade)
+	case "bybit_futures":
+		ce.BybitFutures = append(ce.BybitFutures, trade)
+	case "okx_spot":
+		ce.OKXSpot = append(ce.OKXSpot, trade)
+	case "okx_futures":
+		ce.OKXFutures = append(ce.OKXFutures, trade)
+	case "kucoin_spot":
+		ce.KuCoinSpot = append(ce.KuCoinSpot, trade)
+	case "kucoin_futures":
+		ce.KuCoinFutures = append(ce.KuCoinFutures, trade)
+	case "gate_spot":
+		ce.GateSpot = append(ce.GateSpot, trade)
+	case "gate_futures":
+		ce.GateFutures = append(ce.GateFutures, trade)
+	case "phemex_spot":
+		ce.PhemexSpot = append(ce.PhemexSpot, trade)
+	case "phemex_futures":
+		ce.PhemexFutures = append(ce.PhemexFutures, trade)
+	}
 }

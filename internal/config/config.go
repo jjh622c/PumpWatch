@@ -82,16 +82,23 @@ type CollectionConfig struct {
 
 // SystemConfig represents system-level configuration
 type SystemConfig struct {
-	LogLevel             string        `yaml:"log_level"`
-	MaxMemoryUsage       string        `yaml:"max_memory_usage"`
-	GCInterval           time.Duration `yaml:"gc_interval"`
-	StatusInterval       time.Duration `yaml:"status_interval"`
-	ShutdownTimeout      time.Duration `yaml:"shutdown_timeout"`
-	StatusReportInterval time.Duration `yaml:"status_report_interval"`
-	AutoSaveInterval     time.Duration `yaml:"auto_save_interval"`
-	PoolStartupDelay     time.Duration `yaml:"pool_startup_delay"`
-	ProfilingEnabled     bool          `yaml:"profiling_enabled"`
-	ProfilingPort        int           `yaml:"profiling_port"`
+	LogLevel                  string        `yaml:"log_level"`
+	MaxMemoryUsage            string        `yaml:"max_memory_usage"`
+	GCInterval                time.Duration `yaml:"gc_interval"`
+	StatusInterval            time.Duration `yaml:"status_interval"`
+	ShutdownTimeout           time.Duration `yaml:"shutdown_timeout"`
+	StatusReportInterval      time.Duration `yaml:"status_report_interval"`
+	AutoSaveInterval          time.Duration `yaml:"auto_save_interval"`
+	PoolStartupDelay          time.Duration `yaml:"pool_startup_delay"`
+	ProfilingEnabled          bool          `yaml:"profiling_enabled"`
+	ProfilingPort             int           `yaml:"profiling_port"`
+
+	// Extended Buffer Configuration
+	ExtendedBufferEnabled     bool   `yaml:"extended_buffer_enabled"`
+	ExtendedBufferDuration    string `yaml:"extended_buffer_duration"`    // e.g., "10m"
+	BufferCompressionEnabled  bool   `yaml:"buffer_compression_enabled"`
+	BufferFallbackEnabled     bool   `yaml:"buffer_fallback_enabled"`
+	BufferMaintenanceInterval string `yaml:"buffer_maintenance_interval"` // e.g., "60s"
 }
 
 // ConnectionConfig represents connection timing configuration
@@ -256,16 +263,23 @@ func NewDefaultConfig() *Config {
 			PostAnalysisDelay:  2 * time.Second,
 		},
 		System: SystemConfig{
-			LogLevel:             "info",
-			MaxMemoryUsage:       "16GB",
-			GCInterval:           5 * time.Minute,
-			StatusInterval:       60 * time.Second,
-			ShutdownTimeout:      30 * time.Second,
-			StatusReportInterval: 60 * time.Second,
-			AutoSaveInterval:     5 * time.Minute,
-			PoolStartupDelay:     500 * time.Millisecond,
-			ProfilingEnabled:     false,
-			ProfilingPort:        6060,
+			LogLevel:                  "info",
+			MaxMemoryUsage:            "16GB",
+			GCInterval:                5 * time.Minute,
+			StatusInterval:            60 * time.Second,
+			ShutdownTimeout:           30 * time.Second,
+			StatusReportInterval:      60 * time.Second,
+			AutoSaveInterval:          5 * time.Minute,
+			PoolStartupDelay:          500 * time.Millisecond,
+			ProfilingEnabled:          false,
+			ProfilingPort:             6060,
+
+			// Extended Buffer Configuration (기본값: 비활성화, 안전을 위해)
+			ExtendedBufferEnabled:     false,
+			ExtendedBufferDuration:    "10m",
+			BufferCompressionEnabled:  true,
+			BufferFallbackEnabled:     true,
+			BufferMaintenanceInterval: "60s",
 		},
 		Connection: ConnectionConfig{
 			DefaultPingInterval:      25 * time.Second,

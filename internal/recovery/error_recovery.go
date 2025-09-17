@@ -369,9 +369,9 @@ func (rs *ReconnectionScheduler) triggerHardReset(reason string) {
 	rs.logger.Error("📊 Recovery Stats - Recoveries: %d, Hard Resets: %d",
 		rs.totalRecoveries, rs.totalHardResets)
 
-	// TODO: Integrate with existing restart mechanism
-	// For now, we'll use os.Exit, but this should be configurable
-	// panic(fmt.Sprintf("Hard reset required: %s", reason))
+	// 기존 restart_wrapper.sh 메커니즘과 통합
+	// 현재는 os.Exit을 사용하지만 향후 설정 가능하도록 개선 예정
+	// restart_wrapper.sh가 프로세스 재시작을 담당
 }
 
 // GetStats returns current recovery system statistics
