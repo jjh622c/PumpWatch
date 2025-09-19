@@ -203,19 +203,42 @@ func systemStatusReporter(ctx context.Context, upbitMonitor *monitor.UpbitMonito
 	ticker := time.NewTicker(60 * time.Second) // Every minute
 	defer ticker.Stop()
 
+	// 🆕 Status report counter for detailed reporting every 5 minutes
+	statusCounter := 0
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// EnhancedTaskManager는 별도 상태 보고 시스템 사용
-			logging.Info("🚀 EnhancedTaskManager 운영 중 - 완전한 20초 타이머 데이터 수집 시스템")
+			statusCounter++
 
-			// Upbit monitor status
-			monitorStats := upbitMonitor.GetStats()
-			logging.Info("📡 Monitor Stats - Polls: %d, Detections: %d, Last Check: %v ago",
-				monitorStats.TotalPolls, monitorStats.DetectedListings,
-				time.Since(monitorStats.LastCheck))
+			// Enhanced health monitoring every minute
+			health := upbitMonitor.GetHealthStatus()
+
+			// 🆕 Basic health status every minute
+			logging.Info("💗 System Health [Score: %v/100] - Polls: %v, Listings: %v, Failures: %v, Delay: %v",
+				health["health_score"], health["total_polls"], health["detected_listings"],
+				health["consecutive_failures"], health["average_delay"])
+
+			// 🆕 Detailed status report every 5 minutes
+			if statusCounter%5 == 0 {
+				logging.Info("📊 === Detailed System Status (5min report) ===")
+				upbitMonitor.PrintDetailedStatus()
+
+				// Additional system memory and uptime info
+				logging.Info("⏱️ System Uptime: %v | Last Poll: %v ago",
+					health["uptime"], health["last_poll_age"])
+
+				if health["health_score"].(int) < 70 {
+					logging.Warn("⚠️ SYSTEM HEALTH WARNING - Score below 70!")
+				}
+			}
+
+			// 🆕 Alert on consecutive failures
+			if failures, ok := health["consecutive_failures"].(int); ok && failures > 5 {
+				logging.Warn("🚨 HIGH FAILURE RATE - %d consecutive API failures!", failures)
+			}
 		}
 	}
 }

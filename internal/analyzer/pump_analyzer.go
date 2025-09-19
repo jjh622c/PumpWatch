@@ -3,6 +3,7 @@ package analyzer
 import (
 	"fmt"
 	"log"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -329,7 +330,19 @@ func (pa *PumpAnalyzer) analyzeTimeWindow(exchange, marketType, symbol string, w
 	}
 
 	// Calculate price change percentage
+	// 🔧 BUG FIX: Division by Zero 방지 및 Inf 값 체크
+	if minPrice <= 0 {
+		log.Printf("⚠️ [PUMP_ANALYZER] Invalid minPrice: %.8f for %s_%s, skipping analysis", minPrice, exchange, marketType)
+		return nil
+	}
+
 	priceChange := ((maxPrice - minPrice) / minPrice) * 100
+
+	// 🔧 BUG FIX: Inf/NaN 값 방지 (JSON marshalling 호환성)
+	if math.IsInf(priceChange, 0) || math.IsNaN(priceChange) {
+		log.Printf("⚠️ [PUMP_ANALYZER] Invalid priceChange: %.8f for %s_%s, skipping analysis", priceChange, exchange, marketType)
+		return nil
+	}
 
 	// Check if this qualifies as a pump
 	if priceChange < pa.minPumpPercentage {

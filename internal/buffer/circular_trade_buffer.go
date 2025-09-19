@@ -2,7 +2,10 @@ package buffer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +20,7 @@ const (
 	HotCacheSeconds       = 120                                         // 2분 핫 캐시
 	BatchWriteSize        = 1000                                        // 배치 쓰기 크기
 	BatchFlushInterval    = 10 * time.Millisecond                      // 10ms 배치 주기
+	BackupFileName        = "data/buffer/circular_backup.json"         // 백업 파일 경로
 )
 
 // TimeBucket: 1초 단위 시간 버켓
@@ -47,6 +51,22 @@ type CircularBufferStats struct {
 	HotCacheHits   int64   // 핫 캐시 히트 수
 	ColdBufferHits int64   // 콜드 버퍼 히트 수
 	CompressionRate float64 // 압축률 (미사용)
+}
+
+// BackupData: 하드리셋 대비 백업 데이터 구조
+type BackupData struct {
+	BackupTime    time.Time                         `json:"backup_time"`
+	StartTime     int64                            `json:"start_time"`
+	CurrentBucket int64                            `json:"current_bucket"`
+	Buckets       map[string]BackupBucket          `json:"buckets"`         // timestamp -> bucket data
+	HotCache      map[string][]models.TradeEvent   `json:"hot_cache"`       // exchange -> trades
+	Stats         CircularBufferStats              `json:"stats"`
+}
+
+// BackupBucket: 백업용 버켓 데이터
+type BackupBucket struct {
+	Timestamp int64                            `json:"timestamp"`
+	Trades    map[string][]models.TradeEvent   `json:"trades"` // exchange -> trades
 }
 
 // FastAccessManager: 상장 시나리오 최적화
@@ -130,11 +150,7 @@ func NewCircularTradeBuffer(parentCtx context.Context) *CircularTradeBuffer {
 
 // StoreTradeEvent: 거래 이벤트 저장 (배치 쓰기)
 func (ctb *CircularTradeBuffer) StoreTradeEvent(exchange string, trade models.TradeEvent) error {
-	// 🔍 SOMI 호출 디버깅 (모든 SOMI 데이터)
-	if strings.Contains(strings.ToUpper(trade.Symbol), "SOMI") {
-		fmt.Printf("🔍 [StoreTradeEvent] Called with %s, Symbol: %s, Closed: %v\n",
-			exchange, trade.Symbol, ctb.closed)
-	}
+	// 🔇 디버그 로그 제거 (리소스 절약)
 
 	if ctb.closed {
 		fmt.Printf("❌ [StoreTradeEvent] Buffer is closed, returning error\n")
@@ -160,11 +176,7 @@ func (ctb *CircularTradeBuffer) StoreTradeEvent(exchange string, trade models.Tr
 func (ctb *CircularTradeBuffer) directWrite(exchange string, trade models.TradeEvent) error {
 	bucketIdx := ctb.GetBucketIndex(trade.Timestamp)
 
-	// 🔍 SOMI 데이터 저장 디버깅 (모든 SOMI 데이터)
-	if strings.Contains(strings.ToUpper(trade.Symbol), "SOMI") {
-		fmt.Printf("🔍 [DirectWrite] %s SOMI -> Bucket %d (timestamp=%d)\n",
-			exchange, bucketIdx, trade.Timestamp)
-	}
+	// 🔇 디버그 로그 제거 (리소스 절약)
 
 	bucket := ctb.buckets[bucketIdx]
 
@@ -275,9 +287,7 @@ func (ctb *CircularTradeBuffer) GetBucketIndex(timestamp int64) int64 {
 		seconds = timestamp / 1000
 	}
 
-	// 🔍 디버그: 변환 과정
-	fmt.Printf("🔍 [GetBucketIndex] timestamp=%d -> seconds=%d -> bucket=%d\n",
-		timestamp, seconds, seconds%BucketCount)
+	// 🔇 디버그 로그 제거 (리소스 절약)
 
 	// 1200개 버켓에 순환 매핑 (20분 = 1200초)
 	// 동일한 timestamp는 항상 동일한 버켓에 매핑됨
@@ -301,8 +311,7 @@ func (ctb *CircularTradeBuffer) GetTradeEvents(exchange string, startTime, endTi
 	endNano := endTime.UnixNano()
 
 	// 🔍 디버그 로깅 추가
-	fmt.Printf("🔍 [CircularBuffer] GetTradeEvents - Exchange: %s, Range: %s ~ %s\n",
-		exchange, startTime.Format("15:04:05"), endTime.Format("15:04:05"))
+	// 🔇 디버그 로그 제거 (리소스 절약)
 
 	// 핫 캐시 확인 먼저
 	if trades := ctb.getFromHotCache(exchange, startNano, endNano); trades != nil {
@@ -362,8 +371,7 @@ func (ctb *CircularTradeBuffer) getFromColdBuffer(exchange string, startNano, en
 	endMilli := endNano / 1e6
 
 	// 🔍 디버그: 버켓 인덱스 확인
-	fmt.Printf("🔍 [ColdBuffer] %s: startBucket=%d, endBucket=%d (range: %d ~ %d ms)\n",
-		exchange, startBucket, endBucket, startMilli, endMilli)
+	// 🔇 디버그 로그 제거 (리소스 절약)
 
 	var result []models.TradeEvent
 	totalTradesInBuckets := 0
@@ -376,14 +384,9 @@ func (ctb *CircularTradeBuffer) getFromColdBuffer(exchange string, startNano, en
 
 		if trades, exists := bucket.trades[exchange]; exists {
 			totalTradesInBuckets += len(trades)
-			fmt.Printf("🔍 [ColdBuffer] Bucket %d has %d trades for %s\n", current, len(trades), exchange)
+			// 🔇 디버그 로그 제거 (리소스 절약)
 			for _, trade := range trades {
-				// 🔍 시간 필터링 디버깅 (밀리초 단위로 비교)
-				if strings.Contains(strings.ToUpper(trade.Symbol), "SOMI") {
-					fmt.Printf("🔍 [TimeFilter] Trade timestamp=%d, range=[%d ~ %d], match=%v\n",
-						trade.Timestamp, startMilli, endMilli,
-						trade.Timestamp >= startMilli && trade.Timestamp <= endMilli)
-				}
+				// 🔇 디버그 로그 제거 (리소스 절약)
 				if trade.Timestamp >= startMilli && trade.Timestamp <= endMilli {
 					result = append(result, trade)
 				}
@@ -398,8 +401,7 @@ func (ctb *CircularTradeBuffer) getFromColdBuffer(exchange string, startNano, en
 		current = (current + 1) % BucketCount
 	}
 
-	fmt.Printf("🔍 [ColdBuffer] %s: Total trades in buckets=%d, filtered result=%d\n",
-		exchange, totalTradesInBuckets, len(result))
+	// 🔇 디버그 로그 제거 (리소스 절약)
 
 	return result
 }
@@ -452,6 +454,10 @@ func (ctb *CircularTradeBuffer) getRecentTrades(exchange string, startNano, endN
 	startBucket := ctb.GetBucketIndex(startNano)
 	endBucket := ctb.GetBucketIndex(endNano)
 
+	// 🔧 BUG FIX: 나노초를 밀리초로 변환 (TradeEvent.Timestamp는 밀리초)
+	startMilli := startNano / 1e6
+	endMilli := endNano / 1e6
+
 	var result []models.TradeEvent
 
 	current := startBucket
@@ -461,7 +467,8 @@ func (ctb *CircularTradeBuffer) getRecentTrades(exchange string, startNano, endN
 
 		if trades, exists := bucket.trades[exchange]; exists {
 			for _, trade := range trades {
-				if trade.Timestamp >= startNano && trade.Timestamp <= endNano {
+				// 🔧 BUG FIX: 밀리초 단위로 비교 (기존: 나노초 비교로 인한 데이터 누락)
+				if trade.Timestamp >= startMilli && trade.Timestamp <= endMilli {
 					result = append(result, trade)
 				}
 			}
@@ -621,10 +628,18 @@ func (ctb *CircularTradeBuffer) HandleNormalListing(symbol string, triggerTime t
 	return ctb.ToCollectionEvent(symbol, triggerTime)
 }
 
-// Close: 순환 버퍼 종료
+// Close: 순환 버퍼 종료 + 하드리셋 대비 백업
 func (ctb *CircularTradeBuffer) Close() error {
 	if ctb.closed {
 		return nil
+	}
+
+	// 🔧 CRITICAL FIX: 하드리셋 대비 데이터 백업
+	fmt.Printf("💾 CircularBuffer 백업 시작 (하드리셋 대비)...\n")
+	if err := ctb.SaveToBackup(); err != nil {
+		fmt.Printf("⚠️ CircularBuffer 백업 실패: %v\n", err)
+	} else {
+		fmt.Printf("✅ CircularBuffer 백업 완료: %s\n", BackupFileName)
 	}
 
 	ctb.closed = true
@@ -633,10 +648,153 @@ func (ctb *CircularTradeBuffer) Close() error {
 	// 채널 닫기
 	close(ctb.writeChan)
 
-	// 메모리 정리
+	// 메모리 정리 (백업 후)
 	ctb.rwMutex.Lock()
 	ctb.hotCache = make(map[string]*TradeSlice)
 	ctb.rwMutex.Unlock()
+
+	return nil
+}
+
+// SaveToBackup: 하드리셋 대비 전체 데이터 백업
+func (ctb *CircularTradeBuffer) SaveToBackup() error {
+	ctb.rwMutex.RLock()
+	defer ctb.rwMutex.RUnlock()
+
+	// 백업 디렉토리 생성
+	backupDir := filepath.Dir(BackupFileName)
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		return fmt.Errorf("백업 디렉토리 생성 실패: %w", err)
+	}
+
+	// 백업 데이터 구성
+	backup := BackupData{
+		BackupTime:    time.Now(),
+		StartTime:     ctb.startTime,
+		CurrentBucket: ctb.currentBucket,
+		Buckets:       make(map[string]BackupBucket),
+		HotCache:      make(map[string][]models.TradeEvent),
+		Stats:         ctb.stats,
+	}
+
+	// 모든 버켓 데이터 백업
+	nonEmptyBuckets := 0
+	totalTrades := 0
+	for i, bucket := range ctb.buckets {
+		if bucket != nil && len(bucket.trades) > 0 {
+			bucket.mutex.RLock()
+			bucketKey := fmt.Sprintf("%d", i)
+			backup.Buckets[bucketKey] = BackupBucket{
+				Timestamp: bucket.timestamp,
+				Trades:    bucket.trades,
+			}
+			// 통계 수집
+			for _, trades := range bucket.trades {
+				totalTrades += len(trades)
+			}
+			nonEmptyBuckets++
+			bucket.mutex.RUnlock()
+		}
+	}
+
+	// 핫 캐시 백업
+	for exchange, slice := range ctb.hotCache {
+		if slice != nil && len(slice.trades) > 0 {
+			backup.HotCache[exchange] = slice.trades
+		}
+	}
+
+	// JSON 직렬화 및 저장
+	data, err := json.Marshal(backup)
+	if err != nil {
+		return fmt.Errorf("백업 데이터 직렬화 실패: %w", err)
+	}
+
+	if err := os.WriteFile(BackupFileName, data, 0644); err != nil {
+		return fmt.Errorf("백업 파일 저장 실패: %w", err)
+	}
+
+	fmt.Printf("💾 백업 완료: %d버켓, %d거래, %.1fMB\n",
+		nonEmptyBuckets, totalTrades, float64(len(data))/1024/1024)
+
+	return nil
+}
+
+// LoadFromBackup: 시작 시 백업 데이터 복원
+func (ctb *CircularTradeBuffer) LoadFromBackup() error {
+	// 백업 파일 존재 확인
+	if _, err := os.Stat(BackupFileName); os.IsNotExist(err) {
+		fmt.Printf("📁 백업 파일 없음: %s (새로 시작)\n", BackupFileName)
+		return nil
+	}
+
+	// 백업 파일 읽기
+	data, err := os.ReadFile(BackupFileName)
+	if err != nil {
+		return fmt.Errorf("백업 파일 읽기 실패: %w", err)
+	}
+
+	// JSON 역직렬화
+	var backup BackupData
+	if err := json.Unmarshal(data, &backup); err != nil {
+		fmt.Printf("⚠️ 백업 파일 파싱 실패: %v (새로 시작)\n", err)
+		return nil
+	}
+
+	// 백업 시간 검증 (20분 이내만 복원)
+	if time.Since(backup.BackupTime) > CircularBufferDuration {
+		fmt.Printf("⏰ 백업 파일이 너무 오래됨 (%v) - 새로 시작\n", time.Since(backup.BackupTime))
+		os.Remove(BackupFileName) // 오래된 백업 삭제
+		return nil
+	}
+
+	ctb.rwMutex.Lock()
+	defer ctb.rwMutex.Unlock()
+
+	// 기본 상태 복원
+	ctb.startTime = backup.StartTime
+	ctb.currentBucket = backup.CurrentBucket
+	ctb.stats = backup.Stats
+
+	// 버켓 데이터 복원
+	restoredBuckets := 0
+	restoredTrades := 0
+	for bucketKey, bucketData := range backup.Buckets {
+		var bucketIndex int
+		if _, err := fmt.Sscanf(bucketKey, "%d", &bucketIndex); err != nil {
+			continue
+		}
+		if bucketIndex >= 0 && bucketIndex < len(ctb.buckets) {
+			if ctb.buckets[bucketIndex] == nil {
+				ctb.buckets[bucketIndex] = &TimeBucket{
+					timestamp: bucketData.Timestamp,
+					trades:    bucketData.Trades,
+				}
+			} else {
+				ctb.buckets[bucketIndex].timestamp = bucketData.Timestamp
+				ctb.buckets[bucketIndex].trades = bucketData.Trades
+			}
+			// 통계 수집
+			for _, trades := range bucketData.Trades {
+				restoredTrades += len(trades)
+			}
+			restoredBuckets++
+		}
+	}
+
+	// 핫 캐시 복원
+	for exchange, trades := range backup.HotCache {
+		ctb.hotCache[exchange] = &TradeSlice{
+			trades:   trades,
+			lastUsed: time.Now().UnixNano(),
+		}
+	}
+
+	fmt.Printf("🔄 백업 복원 완료: %d버켓, %d거래 (백업시간: %v)\n",
+		restoredBuckets, restoredTrades, backup.BackupTime.Format("15:04:05"))
+
+	// 성공적 복원 후 백업 파일 삭제
+	os.Remove(BackupFileName)
 
 	return nil
 }

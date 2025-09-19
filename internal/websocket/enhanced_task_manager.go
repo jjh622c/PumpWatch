@@ -101,6 +101,13 @@ func NewEnhancedTaskManager(ctx context.Context, exchangesConfig config.Exchange
 		},
 	}
 
+	// 🔧 CRITICAL FIX: Restore CircularBuffer data from backup (하드리셋 대비)
+	if err := tm.circularBuffer.LoadFromBackup(); err != nil {
+		tm.logger.Warn("⚠️ CircularBuffer 백업 복원 실패 (정상 시작): %v", err)
+	} else {
+		tm.logger.Info("✅ CircularBuffer 백업 복원 완료 (하드리셋 복구)")
+	}
+
 	// Initialize intelligent error recovery system
 	tm.recoveryScheduler = recovery.NewReconnectionScheduler(taskCtx)
 
@@ -407,15 +414,19 @@ func (tm *EnhancedTaskManager) StartDataCollection(symbol string, triggerTime ti
 	}
 
 	// Calculate collection window (-20 seconds to +20 seconds)
-	collectionStart := triggerTime.Add(-20 * time.Second)
-	collectionEnd := triggerTime.Add(20 * time.Second)
+	// 🔧 BUG FIX: detected_at 기준으로 변경 (announced_at 지연 문제 해결)
+	detectedTime := time.Now()
+	collectionStart := detectedTime.Add(-20 * time.Second)
+	collectionEnd := detectedTime.Add(20 * time.Second)
 
 	// Create new collection event
 	tm.currentCollection = models.NewCollectionEvent(symbol, triggerTime)
 
 	tm.logger.Info("📡 Starting data collection for %s", symbol)
-	tm.logger.Info("⏰ Collection window: %s to %s (40 seconds)",
+	tm.logger.Info("⏰ Collection window (detected_at 기준): %s to %s (40 seconds)",
 		collectionStart.Format("15:04:05"), collectionEnd.Format("15:04:05"))
+	tm.logger.Info("🕐 Original trigger_time: %s, Current detected_time: %s (delay: %v)",
+		triggerTime.Format("15:04:05"), detectedTime.Format("15:04:05"), detectedTime.Sub(triggerTime).Round(time.Second))
 
 	// Schedule collection completion
 	tm.scheduleCollectionCompletion(collectionEnd)
@@ -607,31 +618,49 @@ func (tm *EnhancedTaskManager) performHealthCheck() {
 	}
 	tm.statsMu.Unlock()
 
+	// 🔧 DEADLOCK FIX: Collect pool data first, then update stats atomically
+	type poolData struct {
+		poolID       string
+		exchange     string
+		activeWorkers int
+		totalWorkers int
+		totalMessages int64
+	}
+
+	var poolsData []poolData
+
 	tm.poolsMu.RLock()
 	for poolID, pool := range tm.workerPools {
 		poolStats := pool.GetStats()
-
-		activeWorkers := poolStats["active_workers"].(int)
-		totalMessages := poolStats["total_messages"].(int64)
-
-		tm.statsMu.Lock()
-		if activeWorkers > 0 {
-			tm.stats.ActivePools++
-		}
-		tm.stats.ActiveWorkers += activeWorkers
-
-		// Update exchange stats
-		exchangeStats := tm.stats.ExchangeStats[pool.Exchange]
-		exchangeStats.Exchange = pool.Exchange
-		exchangeStats.ActiveWorkers += activeWorkers
-		exchangeStats.TotalMessages = totalMessages
-		tm.stats.ExchangeStats[pool.Exchange] = exchangeStats
-		tm.statsMu.Unlock()
-
-		tm.logger.Debug("🏭 Pool %s: %d/%d workers active, %d messages",
-			poolID, activeWorkers, pool.TotalWorkers, totalMessages)
+		poolsData = append(poolsData, poolData{
+			poolID:       poolID,
+			exchange:     pool.Exchange,
+			activeWorkers: poolStats["active_workers"].(int),
+			totalWorkers: pool.TotalWorkers,
+			totalMessages: poolStats["total_messages"].(int64),
+		})
 	}
 	tm.poolsMu.RUnlock()
+
+	// Now update stats atomically without holding pools lock
+	tm.statsMu.Lock()
+	for _, data := range poolsData {
+		if data.activeWorkers > 0 {
+			tm.stats.ActivePools++
+		}
+		tm.stats.ActiveWorkers += data.activeWorkers
+
+		// Update exchange stats
+		exchangeStats := tm.stats.ExchangeStats[data.exchange]
+		exchangeStats.Exchange = data.exchange
+		exchangeStats.ActiveWorkers += data.activeWorkers
+		exchangeStats.TotalMessages = data.totalMessages
+		tm.stats.ExchangeStats[data.exchange] = exchangeStats
+
+		tm.logger.Debug("🏭 Pool %s: %d/%d workers active, %d messages",
+			data.poolID, data.activeWorkers, data.totalWorkers, data.totalMessages)
+	}
+	tm.statsMu.Unlock()
 
 	// 거래소별 상태 요약 생성
 	var exchangeSummary []string

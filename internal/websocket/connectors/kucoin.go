@@ -327,9 +327,7 @@ func (kc *KuCoinConnector) parseTradeMessage(data []byte) (models.TradeEvent, er
 		return models.TradeEvent{}, fmt.Errorf("JSON 파싱 실패: %v", err)
 	}
 
-	// 🔍 DEBUG: 모든 KuCoin 메시지 로깅 (문제 해결용)
-	fmt.Printf("🔍 KuCoin %s 메시지: type=%s, topic=%s, subject=%s\n",
-		kc.MarketType, message.Type, message.Topic, message.Subject)
+	// 🔇 디버그 로그 제거 (리소스 절약)
 
 	// ACK 메시지 상세 분석 (구독 성공/실패 확인)
 	if message.Type == "ack" {

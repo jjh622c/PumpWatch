@@ -39,9 +39,14 @@ type UpbitMonitor struct {
 	stats     MonitorStats
 	lastCheck time.Time
 
-	// Notification cache to prevent duplicate processing
-	processedNotices map[string]time.Time
-	processMutex     sync.RWMutex
+	// 🆕 Persistent state management (replaces processedNotices map)
+	persistentState *PersistentState
+
+	// 📊 Performance analysis for delay investigation
+	performanceAnalyzer *PerformanceAnalyzer
+
+	// 🔍 Comprehensive delay analysis
+	delayAnalyzer *DelayAnalyzer
 }
 
 // MonitorStats holds monitoring statistics
@@ -59,13 +64,32 @@ type MonitorStats struct {
 func NewUpbitMonitor(ctx context.Context, config config.UpbitConfig, taskManager DataCollectionManager, storageManager *storage.Manager) (*UpbitMonitor, error) {
 	monitorCtx, cancel := context.WithCancel(ctx)
 
+	// 🆕 Initialize persistent state manager
+	persistentState, err := NewPersistentState("data/monitor")
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to initialize persistent state: %w", err)
+	}
+
+	// 📊 Initialize performance analyzer for delay investigation
+	performanceAnalyzer := NewPerformanceAnalyzer()
+	if err := performanceAnalyzer.StartAnalysis(monitorCtx); err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to initialize performance analyzer: %w", err)
+	}
+
+	// 🔍 Initialize comprehensive delay analyzer
+	delayAnalyzer := NewDelayAnalyzer(performanceAnalyzer, persistentState)
+
 	monitor := &UpbitMonitor{
-		config:           config,
-		taskManager:      taskManager,
-		storageManager:   storageManager,
-		ctx:              monitorCtx,
-		cancel:           cancel,
-		processedNotices: make(map[string]time.Time),
+		config:              config,
+		taskManager:         taskManager,
+		storageManager:      storageManager,
+		ctx:                 monitorCtx,
+		cancel:              cancel,
+		persistentState:     persistentState,     // 🆕 Use persistent state instead of map
+		performanceAnalyzer: performanceAnalyzer, // 📊 Performance tracking
+		delayAnalyzer:       delayAnalyzer,       // 🔍 Delay analysis
 		httpClient: &http.Client{
 			Timeout: config.Timeout,
 		},
@@ -116,8 +140,10 @@ func (um *UpbitMonitor) Stop(ctx context.Context) error {
 
 	um.cancel()
 
-	// Clean up processed notices (older than 1 hour)
-	um.cleanupProcessedNotices()
+	// 🆕 Force cleanup and save persistent state
+	if err := um.persistentState.ForceCleanup(); err != nil {
+		fmt.Printf("⚠️ Failed to cleanup persistent state: %v\n", err)
+	}
 
 	fmt.Println("📡 Upbit Monitor stopped")
 	return nil
@@ -161,12 +187,14 @@ func (um *UpbitMonitor) checkForListings() {
 	announcements, err := um.fetchAnnouncements()
 	if err != nil {
 		fmt.Printf("⚠️ Failed to fetch Upbit announcements: %v\n", err)
+		um.persistentState.RecordError(fmt.Sprintf("API fetch failed: %v", err)) // 🆕 Record error
 		return
 	}
 
-	// Update response time
+	// Update response time and persistent statistics
 	responseTime := time.Since(startTime)
 	um.updateAverageResponseTime(responseTime)
+	um.persistentState.UpdatePollStatistics() // 🆕 Update persistent statistics
 
 	// Process announcements for listings
 	for _, announcement := range announcements {
@@ -178,37 +206,76 @@ func (um *UpbitMonitor) checkForListings() {
 	}
 }
 
-// fetchAnnouncements fetches latest announcements from Upbit API
+// fetchAnnouncements fetches latest announcements from Upbit API with performance tracking
 func (um *UpbitMonitor) fetchAnnouncements() ([]UpbitAnnouncement, error) {
+	// 📊 Start performance tracking
+	startTime := time.Now()
+	var statusCode int
+	var success bool
+	var errorMessage string
+	var responseSize int64
+	var announcementCount int
+	var newListingDetected bool
+
+	// Ensure performance is recorded regardless of outcome
+	defer func() {
+		endTime := time.Now()
+		um.performanceAnalyzer.RecordAPICall(
+			startTime, endTime, statusCode, success, errorMessage,
+			responseSize, announcementCount, newListingDetected,
+		)
+	}()
+
 	req, err := http.NewRequestWithContext(um.ctx, "GET", um.config.APIURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		errorMessage = fmt.Sprintf("failed to create request: %v", err)
+		return nil, fmt.Errorf(errorMessage)
 	}
 
 	req.Header.Set("User-Agent", um.config.UserAgent)
 
 	resp, err := um.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("HTTP request failed: %w", err)
+		errorMessage = fmt.Sprintf("HTTP request failed: %v", err)
+		return nil, fmt.Errorf(errorMessage)
 	}
 	defer resp.Body.Close()
 
+	statusCode = resp.StatusCode
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status: %d", resp.StatusCode)
+		errorMessage = fmt.Sprintf("API returned status: %d", resp.StatusCode)
+		return nil, fmt.Errorf(errorMessage)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+		errorMessage = fmt.Sprintf("failed to read response: %v", err)
+		return nil, fmt.Errorf(errorMessage)
 	}
+
+	responseSize = int64(len(body))
 
 	var response UpbitAPIResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse JSON: %w", err)
+		errorMessage = fmt.Sprintf("failed to parse JSON: %v", err)
+		return nil, fmt.Errorf(errorMessage)
 	}
 
 	if !response.Success {
-		return nil, fmt.Errorf("API returned unsuccessful response")
+		errorMessage = "API returned unsuccessful response"
+		return nil, fmt.Errorf(errorMessage)
+	}
+
+	// 📊 Record successful metrics
+	success = true
+	announcementCount = len(response.Data.Notices)
+
+	// Check if there are any new KRW listings in this response
+	for _, announcement := range response.Data.Notices {
+		if um.wouldProcessAnnouncement(announcement) {
+			newListingDetected = true
+			break
+		}
 	}
 
 	return response.Data.Notices, nil
@@ -216,13 +283,17 @@ func (um *UpbitMonitor) fetchAnnouncements() ([]UpbitAnnouncement, error) {
 
 // shouldProcessAnnouncement determines if an announcement should be processed
 func (um *UpbitMonitor) shouldProcessAnnouncement(announcement UpbitAnnouncement) bool {
-	um.processMutex.RLock()
-	_, alreadyProcessed := um.processedNotices[strconv.Itoa(announcement.ID)]
-	um.processMutex.RUnlock()
-
-	if alreadyProcessed {
+	// 🆕 Check persistent state instead of memory map
+	noticeID := strconv.Itoa(announcement.ID)
+	if um.persistentState.IsNoticeProcessed(noticeID) {
 		return false
 	}
+
+	return um.wouldProcessAnnouncement(announcement)
+}
+
+// wouldProcessAnnouncement checks if an announcement would be processed (without state check)
+func (um *UpbitMonitor) wouldProcessAnnouncement(announcement UpbitAnnouncement) bool {
 
 	// Check if announcement is recent (within 30 minutes to catch all listings)
 	// Fixed: Extended from 15 seconds to 30 minutes to prevent missing listings
@@ -278,10 +349,18 @@ func (um *UpbitMonitor) parseListingAnnouncement(announcement UpbitAnnouncement)
 
 // handleListingEvent processes a detected listing event
 func (um *UpbitMonitor) handleListingEvent(event *models.ListingEvent) {
-	// Mark as processed
-	um.processMutex.Lock()
-	um.processedNotices[event.ID] = time.Now()
-	um.processMutex.Unlock()
+	// 🆕 Create detailed notice record for persistent storage
+	noticeRecord := NoticeRecord{
+		AnnouncedAt:   event.AnnouncedAt,
+		DetectedAt:    event.DetectedAt,
+		Symbol:        event.Symbol,
+		Title:         event.Title,
+		DelayDuration: event.DetectedAt.Sub(event.AnnouncedAt),
+		Success:       true, // Will be updated if collection fails
+	}
+
+	// Mark as processed in persistent state
+	um.persistentState.MarkNoticeProcessed(event.ID, noticeRecord)
 
 	// Update statistics
 	um.mu.Lock()
@@ -304,11 +383,19 @@ func (um *UpbitMonitor) handleListingEvent(event *models.ListingEvent) {
 		um.mu.Lock()
 		um.stats.FailedTriggers++
 		um.mu.Unlock()
+
+		// 🆕 Update persistent state with failure
+		noticeRecord.Success = false
+		um.persistentState.MarkNoticeProcessed(event.ID, noticeRecord)
+		um.persistentState.RecordError(fmt.Sprintf("Data collection failed for %s: %v", event.Symbol, err))
 	} else {
 		fmt.Printf("🚀 Data collection triggered successfully\n")
 		um.mu.Lock()
 		um.stats.SuccessfulTriggers++
 		um.mu.Unlock()
+
+		// 🆕 Confirm success in persistent state
+		um.persistentState.MarkNoticeProcessed(event.ID, noticeRecord)
 	}
 }
 
@@ -349,16 +436,61 @@ func (um *UpbitMonitor) updateAverageResponseTime(responseTime time.Duration) {
 	}
 }
 
-func (um *UpbitMonitor) cleanupProcessedNotices() {
-	um.processMutex.Lock()
-	defer um.processMutex.Unlock()
+// 🆕 GetHealthStatus returns comprehensive system health status
+func (um *UpbitMonitor) GetHealthStatus() map[string]interface{} {
+	um.mu.RLock()
+	defer um.mu.RUnlock()
 
-	cutoff := time.Now().Add(-1 * time.Hour)
-	for id, processedAt := range um.processedNotices {
-		if processedAt.Before(cutoff) {
-			delete(um.processedNotices, id)
+	health := um.persistentState.GetHealthStatus()
+	health["monitor_running"] = um.running
+	health["last_check"] = um.lastCheck.Format("2006-01-02 15:04:05")
+	health["config_enabled"] = um.config.Enabled
+	health["poll_interval"] = um.config.PollInterval.String()
+
+	// 📊 Add performance analysis data
+	performanceReport := um.performanceAnalyzer.GetPerformanceReport()
+	health["performance_score"] = performanceReport["performance_score"]
+	health["api_metrics"] = performanceReport["api_metrics"]
+	health["system_metrics"] = performanceReport["system_metrics"]
+	health["recommendations"] = performanceReport["recommendations"]
+
+	return health
+}
+
+// 🆕 PrintDetailedStatus prints comprehensive status information
+func (um *UpbitMonitor) PrintDetailedStatus() {
+	health := um.GetHealthStatus()
+	stats := um.persistentState.GetStatistics()
+
+	fmt.Printf("\n📊 === Upbit Monitor Status ===\n")
+	fmt.Printf("🔄 Running: %v | Health Score: %v/100 | Performance Score: %v/100\n",
+		health["monitor_running"], health["health_score"], health["performance_score"])
+	fmt.Printf("📡 Total Polls: %v | Detected Listings: %v\n", health["total_polls"], health["detected_listings"])
+	fmt.Printf("⏱️ Average Delay: %v | Max Delay: %v\n", health["average_delay"], health["max_delay"])
+	fmt.Printf("❌ Consecutive Failures: %v | Processed Notices: %v\n", health["consecutive_failures"], health["processed_notices"])
+	fmt.Printf("💾 Uptime: %v | Last Poll: %v\n", health["uptime"], health["last_poll_age"])
+
+	// 📊 Print performance analysis report
+	um.performanceAnalyzer.PrintPerformanceReport()
+
+	// 🔍 Print comprehensive delay analysis if performance issues detected
+	if health["performance_score"].(int) < 80 || health["health_score"].(int) < 80 {
+		fmt.Printf("\n🚨 === 성능 문제 감지 - 상세 지연 분석 실행 ===\n")
+		um.delayAnalyzer.PrintDelayAnalysisReport()
+	}
+
+	// Show recent processed notices (last 1 hour)
+	if len(stats.ProcessedNotices) > 0 {
+		fmt.Printf("\n📋 Recent Listings (Last Hour):\n")
+		for id, record := range stats.ProcessedNotices {
+			status := "✅"
+			if !record.Success {
+				status = "❌"
+			}
+			fmt.Printf("  %s %s (%s) - Delay: %v\n", status, record.Symbol, id, record.DelayDuration)
 		}
 	}
+	fmt.Printf("===============================\n\n")
 }
 
 // UpbitAPIResponse represents the full Upbit API response
