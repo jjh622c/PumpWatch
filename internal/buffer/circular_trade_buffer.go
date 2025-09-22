@@ -315,14 +315,14 @@ func (ctb *CircularTradeBuffer) GetTradeEvents(exchange string, startTime, endTi
 
 	// 핫 캐시 확인 먼저
 	if trades := ctb.getFromHotCache(exchange, startNano, endNano); trades != nil {
-		fmt.Printf("✅ [CircularBuffer] Hot cache hit: %d trades\n", len(trades))
+		// 🔇 디버그 로그 제거 (리소스 절약)
 		ctb.mutex.Lock()
 		ctb.stats.HotCacheHits++
 		ctb.mutex.Unlock()
 		return trades, nil
 	}
 
-	fmt.Printf("❌ [CircularBuffer] Hot cache miss, trying cold buffer\n")
+	// 🔇 디버그 로그 제거 (리소스 절약)
 
 	// 콜드 버퍼에서 검색
 	trades := ctb.getFromColdBuffer(exchange, startNano, endNano)

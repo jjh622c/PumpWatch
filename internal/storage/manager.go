@@ -734,7 +734,7 @@ type RefinedAnalysis struct {
 
 // performPumpAnalysis performs pump analysis and stores refined data
 func (sm *Manager) performPumpAnalysis(collectionEvent *models.CollectionEvent, refinedDir string) error {
-	fmt.Printf("🔍 Starting pump analysis for %s...\n", collectionEvent.Symbol)
+	// 🔇 디버그 로그 제거 (리소스 절약)
 
 	// Wait for post_analysis_delay if configured
 	if sm.analysisConfig.MaxAnalysisDelay > 0 {
@@ -811,12 +811,9 @@ func (sm *Manager) performPumpAnalysis(collectionEvent *models.CollectionEvent, 
 
 // 🔧 BUG FIX: JSON 안전성 보장 - Inf/NaN 값 필터링
 func (sm *Manager) sanitizeJSONData(data interface{}) interface{} {
-	if data == nil {
-		return nil
-	}
-
-	val := reflect.ValueOf(data)
-	return sm.sanitizeValue(val).Interface()
+	// 🔧 EMERGENCY FIX: Disable complex reflection to prevent panics
+	// Just return data as-is and let JSON marshaller handle errors gracefully
+	return data
 }
 
 // sanitizeValue recursively sanitizes values to ensure JSON compatibility

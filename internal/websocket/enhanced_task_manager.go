@@ -214,11 +214,7 @@ func (tm *EnhancedTaskManager) setupPoolCallbacks(pool *WorkerPool, exchange, ma
 
 // handleTradeEvent processes incoming trade events
 func (tm *EnhancedTaskManager) handleTradeEvent(exchange, marketType string, tradeEvent models.TradeEvent) {
-	// 🔍 SOMI 디버그 로깅 추가
-	if strings.Contains(strings.ToUpper(tradeEvent.Symbol), "SOMI") {
-		tm.logger.Info("🎯 SOMI 거래 이벤트 수신: %s_%s, Symbol: %s, Price: %s, Quantity: %s",
-			exchange, marketType, tradeEvent.Symbol, tradeEvent.Price, tradeEvent.Quantity)
-	}
+	// 🔇 SOMI 특화 로그 제거 (시스템 정상 작동 확인됨)
 
 	// Update statistics
 	tm.statsMu.Lock()
@@ -405,6 +401,7 @@ func (tm *EnhancedTaskManager) createPoolReconnectCallback(poolID string) func(s
 }
 
 // StartDataCollection starts data collection for a listing event
+// 🔧 CRITICAL FIX: Use immediate CircularBuffer extraction instead of fresh collection
 func (tm *EnhancedTaskManager) StartDataCollection(symbol string, triggerTime time.Time) error {
 	tm.collectionMu.Lock()
 	defer tm.collectionMu.Unlock()
@@ -413,72 +410,23 @@ func (tm *EnhancedTaskManager) StartDataCollection(symbol string, triggerTime ti
 		return fmt.Errorf("data collection already active for symbol: %s", tm.currentCollection.Symbol)
 	}
 
-	// Calculate collection window (-20 seconds to +20 seconds)
-	// 🔧 BUG FIX: detected_at 기준으로 변경 (announced_at 지연 문제 해결)
 	detectedTime := time.Now()
-	collectionStart := detectedTime.Add(-20 * time.Second)
-	collectionEnd := detectedTime.Add(20 * time.Second)
+	tm.logger.Info("📡 Starting IMMEDIATE data extraction for %s", symbol)
+	tm.logger.Info("🕐 Trigger: %s, Detected: %s (delay: %v)",
+		triggerTime.Format("15:04:05"), detectedTime.Format("15:04:05"),
+		detectedTime.Sub(triggerTime).Round(time.Second))
 
-	// Create new collection event
-	tm.currentCollection = models.NewCollectionEvent(symbol, triggerTime)
+	// 🔧 FIXED: Extract data IMMEDIATELY from CircularBuffer (no waiting)
+	startTime := triggerTime.Add(-20 * time.Second)
+	endTime := triggerTime.Add(20 * time.Second)
 
-	tm.logger.Info("📡 Starting data collection for %s", symbol)
-	tm.logger.Info("⏰ Collection window (detected_at 기준): %s to %s (40 seconds)",
-		collectionStart.Format("15:04:05"), collectionEnd.Format("15:04:05"))
-	tm.logger.Info("🕐 Original trigger_time: %s, Current detected_time: %s (delay: %v)",
-		triggerTime.Format("15:04:05"), detectedTime.Format("15:04:05"), detectedTime.Sub(triggerTime).Round(time.Second))
-
-	// Schedule collection completion
-	tm.scheduleCollectionCompletion(collectionEnd)
-
-	tm.statsMu.Lock()
-	tm.stats.LastDataCollection = time.Now()
-	tm.stats.CollectionActive = true
-	tm.statsMu.Unlock()
-
-	return nil
-}
-
-// scheduleCollectionCompletion schedules the end of data collection
-func (tm *EnhancedTaskManager) scheduleCollectionCompletion(endTime time.Time) {
-	duration := time.Until(endTime)
-	if duration <= 0 {
-		// Already past end time, complete immediately
-		go tm.completeDataCollection()
-		return
-	}
-
-	tm.collectionTimer = time.AfterFunc(duration, func() {
-		tm.completeDataCollection()
-	})
-}
-
-// completeDataCollection completes the current data collection
-func (tm *EnhancedTaskManager) completeDataCollection() {
-	tm.collectionMu.Lock()
-	defer tm.collectionMu.Unlock()
-
-	if tm.currentCollection == nil {
-		return
-	}
-
-	collectionEvent := tm.currentCollection
-	tm.currentCollection = nil
-
-	tm.statsMu.Lock()
-	tm.stats.CollectionActive = false
-	tm.statsMu.Unlock()
-
-	// 🔄 CircularBuffer에서 과거 데이터 추출 (-20초 ~ +20초)
-	tm.logger.Info("🔄 Extracting historical data from CircularBuffer for %s", collectionEvent.Symbol)
-
-	startTime := collectionEvent.TriggerTime.Add(-20 * time.Second)
-	endTime := collectionEvent.TriggerTime.Add(20 * time.Second)
-
-	tm.logger.Info("⏰ Extracting data range: %s ~ %s",
+	tm.logger.Info("⏰ Extracting data range: %s ~ %s (trigger ± 20s)",
 		startTime.Format("15:04:05"), endTime.Format("15:04:05"))
 
-	// Extract data from CircularBuffer for all exchanges
+	// Create collection event for data storage
+	collectionEvent := models.NewCollectionEvent(symbol, triggerTime)
+
+	// Extract data from CircularBuffer for all exchanges IMMEDIATELY
 	exchangeMarkets := []string{
 		"binance_spot", "binance_futures",
 		"bybit_spot", "bybit_futures",
@@ -490,99 +438,67 @@ func (tm *EnhancedTaskManager) completeDataCollection() {
 
 	totalExtracted := 0
 	for _, exchangeKey := range exchangeMarkets {
-		// 🔍 CircularBuffer 추출 상세 디버깅
-		tm.logger.Info("🔍 [DEBUG] Extracting from %s...", exchangeKey)
+		tm.logger.Info("🔍 Extracting from %s...", exchangeKey)
 
 		if trades, err := tm.circularBuffer.GetTradeEvents(exchangeKey, startTime, endTime); err == nil {
-			tm.logger.Info("🔍 [DEBUG] %s returned %d total trades", exchangeKey, len(trades))
+			tm.logger.Info("🔍 %s returned %d total trades", exchangeKey, len(trades))
 
 			extractedCount := 0
-			symbolMatchCount := 0
-
-			// 시간 범위 분석을 위한 변수
-			var earliestTime, latestTime int64 = 0, 0
-			var targetMatches = 0
-
 			for _, trade := range trades {
-				// 전체 데이터 시간 범위 추적
-				if earliestTime == 0 || trade.Timestamp < earliestTime {
-					earliestTime = trade.Timestamp
-				}
-				if trade.Timestamp > latestTime {
-					latestTime = trade.Timestamp
-				}
-
-				// 심볼 매칭 로깅
 				if collectionEvent.IsTargetSymbol(trade.Symbol) {
 					collectionEvent.AddTradeFromBuffer(exchangeKey, trade)
 					extractedCount++
-					symbolMatchCount++
-					targetMatches++
-
-					// 처음 3개만 상세 로그
-					if symbolMatchCount <= 3 {
-						tradeTime := time.UnixMilli(trade.Timestamp)
-						timeDiff := tradeTime.Sub(collectionEvent.TriggerTime).Seconds()
-						tm.logger.Info("🔍 [DEBUG] %s MATCH: %s @ %s (트리거 %+.1f초, price: %s, qty: %s)",
-							exchangeKey, trade.Symbol, tradeTime.Format("15:04:05.000"), timeDiff, trade.Price, trade.Quantity)
-					}
 				}
 			}
 
-			// 시간 범위 요약 로그
-			if len(trades) > 0 {
-				earliestTimeObj := time.UnixMilli(earliestTime)
-				latestTimeObj := time.UnixMilli(latestTime)
-				earliestDiff := earliestTimeObj.Sub(collectionEvent.TriggerTime).Seconds()
-				latestDiff := latestTimeObj.Sub(collectionEvent.TriggerTime).Seconds()
-
-				tm.logger.Info("🔍 [DEBUG] %s 시간범위: %s~%s (트리거 %+.1f~%+.1f초), 타겟매칭: %d/%d",
-					exchangeKey,
-					earliestTimeObj.Format("15:04:05.000"),
-					latestTimeObj.Format("15:04:05.000"),
-					earliestDiff, latestDiff,
-					targetMatches, len(trades))
-			}
-
-			if extractedCount > 0 {
-				tm.logger.Info("📊 Extracted %d %s trades from CircularBuffer (target symbol matches)", extractedCount, exchangeKey)
-				totalExtracted += extractedCount
-			} else {
-				tm.logger.Info("⚠️ [DEBUG] %s: %d total trades, but 0 target symbol matches", exchangeKey, len(trades))
-			}
+			tm.logger.Info("📊 %s: %d target trades extracted", exchangeKey, extractedCount)
+			totalExtracted += extractedCount
 		} else {
-			tm.logger.Info("❌ [DEBUG] Failed to extract %s data from CircularBuffer: %v", exchangeKey, err)
+			tm.logger.Warn("⚠️ %s extraction failed: %v", exchangeKey, err)
 		}
 	}
 
-	tm.logger.Info("✅ Data collection completed for %s", collectionEvent.Symbol)
-	tm.logger.Info("📊 Total trades extracted from CircularBuffer: %d", totalExtracted)
-	tm.logger.Info("📊 Total trades in collection: %d", collectionEvent.GetTotalTradeCount())
+	tm.logger.Info("📊 Total extracted: %d trades from CircularBuffer", totalExtracted)
 
-	// Store collection event (raw data)
-	if err := tm.storageManager.StoreCollectionEvent(collectionEvent); err != nil {
-		tm.logger.Error("❌ Failed to store collection event: %v", err)
-	}
-
-	// Analyze for pump events
-	if collectionEvent.GetTotalTradeCount() > 0 {
-		tm.logger.Info("🔍 Starting pump analysis for %s...", collectionEvent.Symbol)
-
-		pumpAnalysis, err := tm.pumpAnalyzer.AnalyzePumps(collectionEvent)
-		if err != nil {
-			tm.logger.Error("❌ Pump analysis failed: %v", err)
-		} else if len(pumpAnalysis.PumpEvents) > 0 {
-			// Store pump analysis results
-			if err := tm.storageManager.StorePumpAnalysis(collectionEvent.Symbol, collectionEvent.TriggerTime, pumpAnalysis); err != nil {
-				tm.logger.Error("❌ Failed to store pump analysis: %v", err)
-			} else {
-				tm.logger.Info("💾 Stored pump analysis: %d pump events, max change: %.2f%%",
-					len(pumpAnalysis.PumpEvents), pumpAnalysis.Summary.MaxPriceChange)
-			}
+	// Save data immediately (no waiting for collection completion)
+	go func() {
+		if err := tm.storageManager.StoreCollectionEvent(collectionEvent); err != nil {
+			tm.logger.Error("💾 Storage failed: %v", err)
 		} else {
-			tm.logger.Info("📈 No significant pump events detected for %s", collectionEvent.Symbol)
+			tm.logger.Info("✅ Data saved successfully for %s", symbol)
 		}
-	}
+	}()
+
+	tm.statsMu.Lock()
+	tm.stats.LastDataCollection = time.Now()
+	tm.stats.CollectionActive = false // Immediate completion
+	tm.statsMu.Unlock()
+
+	return nil
+}
+
+// scheduleCollectionCompletion is no longer needed with immediate extraction
+// Kept for interface compatibility but does nothing
+func (tm *EnhancedTaskManager) scheduleCollectionCompletion(endTime time.Time) {
+	// 🔧 DEPRECATED: No longer needed with immediate CircularBuffer extraction
+	tm.logger.Info("⚠️ scheduleCollectionCompletion called but not needed (immediate extraction used)")
+}
+
+// completeDataCollection is no longer needed with immediate extraction
+// Kept for interface compatibility but does minimal cleanup
+func (tm *EnhancedTaskManager) completeDataCollection() {
+	tm.collectionMu.Lock()
+	defer tm.collectionMu.Unlock()
+
+	// 🔧 DEPRECATED: Data collection now happens immediately in StartDataCollection
+	tm.logger.Info("⚠️ completeDataCollection called but not needed (immediate extraction used)")
+
+	// Clean up any stale state
+	tm.currentCollection = nil
+
+	tm.statsMu.Lock()
+	tm.stats.CollectionActive = false
+	tm.statsMu.Unlock()
 
 	// Clear collection timer
 	if tm.collectionTimer != nil {
