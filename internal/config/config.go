@@ -202,7 +202,7 @@ func NewDefaultConfig() *Config {
 			APIURL:       "https://api-manager.upbit.com/api/v1/announcements?os=web&page=1&per_page=20&category=trade",
 			PollInterval: 5 * time.Second,
 			Timeout:      10 * time.Second,
-			UserAgent:    "METDC/2.0",
+			UserAgent:    "PumpWatch/2.0",
 		},
 		Exchanges: ExchangesConfig{
 			Binance: ExchangeConfig{

@@ -38,13 +38,13 @@ func main() {
 	printBanner()
 
 	// Initialize comprehensive logging system
-	if err := logging.InitGlobalLogger("metdc", *logLevel, "logs"); err != nil {
+	if err := logging.InitGlobalLogger("pumpwatch", *logLevel, "logs"); err != nil {
 		fmt.Printf("❌ Failed to initialize logging: %v\n", err)
 		os.Exit(1)
 	}
 	defer logging.CloseGlobalLogger()
 
-	logging.Info("🚀 METDC v%s starting up...", Version)
+	logging.Info("🚀 %s v%s starting up...", AppName, Version)
 
 	// Context with cancellation for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -162,20 +162,20 @@ func main() {
 		logging.Info("✅ Storage manager closed")
 	}
 
-	logging.Info("👋 METDC v2.0 shutdown complete")
+	logging.Info("👋 %s v%s shutdown complete", AppName, Version)
 }
 
 // printBanner displays the application banner
 func printBanner() {
 	banner := `
 	🚀 ===================================== 🚀
-	   METDC v%s - Multi-Exchange Trade Data Collector
+	   %s v%s - 업비트 상장 펌핑 분석 시스템
 	   업비트 상장공고 기반 견고한 실시간 데이터 수집 시스템
-	   
+
 	   "무식하게 때려박기" - 단순함이 최고의 안전장치
 	🚀 ===================================== 🚀
 	`
-	fmt.Printf(banner, Version)
+	fmt.Printf(banner, AppName, Version)
 }
 
 // initializeSymbols creates and saves initial symbols configuration

@@ -19,7 +19,7 @@ type PumpAnalyzer interface {
 	AnalyzePumps(collectionEvent *models.CollectionEvent) (*PumpAnalysis, error)
 }
 
-// Manager handles all storage operations for METDC v2.0
+// Manager handles all storage operations for PumpWatch v2.0
 type Manager struct {
 	config         config.StorageConfig
 	analysisConfig config.AnalysisConfig

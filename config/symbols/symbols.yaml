@@ -1,5 +1,5 @@
 version: "2.0"
-updated_at: 2025-09-24T20:54:49.888552184+09:00
+updated_at: 2025-09-25T19:09:43.023608859+09:00
 upbit_krw_symbols:
     - WAXP
     - CARV
@@ -1139,7 +1139,8 @@ exchanges:
             - TRADOORUSDT
             - BLESSUSDT
             - FLUIDUSDT
-        last_updated: 2025-09-24T20:54:48.329299017+09:00
+            - COAIUSDT
+        last_updated: 2025-09-25T19:09:41.727620801+09:00
     bybit:
         spot_endpoint: wss://stream.bybit.com/v5/public/spot
         futures_endpoint: wss://stream.bybit.com/v5/public/linear
@@ -1886,6 +1887,7 @@ exchanges:
             - FLOCKUSDT
             - FLOWUSDT
             - FLRUSDT
+            - FLUIDUSDT
             - FLUXUSDT
             - FORMUSDT
             - FORTHUSDT
@@ -2115,8 +2117,7 @@ exchanges:
             - SEIUSDT
             - SENDUSDT
             - SERAPHUSDT
-            - SFPUSDT
-        last_updated: 2025-09-24T20:54:48.651245987+09:00
+        last_updated: 2025-09-25T19:09:41.999643041+09:00
     gate:
         spot_endpoint: wss://api.gateio.ws/ws/v4/
         futures_endpoint: wss://fx-ws.gateio.ws/v4/ws
@@ -2185,8 +2186,8 @@ exchanges:
             - TA_USDT
             - AIVA_USDT
             - ACNX_USDT
-            - AKUMA_USDT
             - KSM_USDT
+            - AKUMA_USDT
             - DOGE3S_USDT
             - NOS_USDT
             - ONE_USDT
@@ -2223,8 +2224,8 @@ exchanges:
             - ATA_USDT
             - BEFE_USDT
             - MAHA_USDT
-            - EMYC_USDT
             - VOXEL_USDT
+            - EMYC_USDT
             - AVGOX_USDT
             - VLR_USDT
             - SQT_USDT
@@ -2249,8 +2250,8 @@ exchanges:
             - LAVA_USDT
             - MILO_USDT
             - UNIT0_USDT
-            - DOT5L_USDT
             - NCN_USDT
+            - DOT5L_USDT
             - BABYNEIRO_USDT
             - TRADE_USDT
             - TSLAON_USDT
@@ -2259,13 +2260,13 @@ exchanges:
             - GZONE_USDT
             - MOVE3L_USDT
             - SUNDOG_USDT
-            - ETN_USDT
             - PUNDIAI_USDT
+            - ETN_USDT
             - NAFT_USDT
             - GMX_USDT
             - XEN_USDT
-            - SBETON_USDT
             - KCT_USDT
+            - SBETON_USDT
             - QORPO_USDT
             - FAST_USDT
             - ZODI_USDT
@@ -2286,8 +2287,8 @@ exchanges:
             - KAS3S_USDT
             - FRIEND_USDT
             - THETA3L_USDT
-            - LOOKS_USDT
             - 3ULL_USDT
+            - LOOKS_USDT
             - ETH3L_USDT
             - SEAT_USDT
             - SIREN_USDT
@@ -2332,13 +2333,13 @@ exchanges:
             - GAS_USDT
             - ALT_USDT
             - PEPE5S_USDT
-            - ZBCN3S_USDT
             - FB_USDT
+            - ZBCN3S_USDT
             - PEOPLEFB_USDT
             - NEWT_USDT
             - ZP_USDT
-            - PERP_USDT
             - CELB_USDT
+            - PERP_USDT
             - ZIG_USDT
             - GALA_USDT
             - LLT_USDT
@@ -2361,8 +2362,8 @@ exchanges:
             - EGAME_USDT
             - FOR_USDT
             - APT5S_USDT
-            - EURT_USDT
             - RBTC_USDT
+            - EURT_USDT
             - NFP_USDT
             - BAT_USDT
             - EYWA_USDT
@@ -2374,11 +2375,11 @@ exchanges:
             - MOODENG_USDT
             - NEIROETH_USDT
             - POND_USDT
-            - UNFI_USDT
             - MUSE_USDT
-            - YFDAI_USDT
-            - SAND3L_USDT
+            - UNFI_USDT
             - GAMESTARTER_USDT
+            - SAND3L_USDT
+            - YFDAI_USDT
             - WLFI3S_USDT
             - VEMP_USDT
             - DRIFT_USDT
@@ -2441,8 +2442,8 @@ exchanges:
             - REX_USDT
             - BEES_USDT
             - JANET_USDT
-            - AINN_USDT
             - SSV_USDT
+            - AINN_USDT
             - MAF_USDT
             - ZKWASM_USDT
             - TRB3L_USDT
@@ -2511,8 +2512,8 @@ exchanges:
             - MPH_USDT
             - MUBI_USDT
             - BOTIFY_USDT
-            - EIGEN3L_USDT
             - WNDR_USDT
+            - EIGEN3L_USDT
             - MITO_USDT
             - ERA_USDT
             - WLD5S_USDT
@@ -2536,8 +2537,8 @@ exchanges:
             - SWAP_USDT
             - PIPPIN_USDT
             - BSCPAD_USDT
-            - SNX_USDT
             - DUCK_USDT
+            - SNX_USDT
             - BID_USDT
             - WAXP_USDT
             - ZAT_USDT
@@ -2556,8 +2557,8 @@ exchanges:
             - MAGA_USDT
             - SNPT_USDT
             - KAITO3S_USDT
-            - DIONE_USDT
             - L3_USDT
+            - DIONE_USDT
             - VTG_USDT
             - ALPH_USDT
             - SOPH_USDT
@@ -2568,16 +2569,16 @@ exchanges:
             - FTRB_USDT
             - SINGLE_USDT
             - KIP_USDT
-            - POP_USDT
             - BTC_USDT
+            - POP_USDT
             - SHIB5S_USDT
-            - VDR_USDT
             - ALI_USDT
+            - VDR_USDT
             - PROVE_USDT
             - CLV_USDT
             - OWN_USDT
-            - SEAL_USDT
             - BTT_USDT
+            - SEAL_USDT
             - KYVE_USDT
             - SPEC_USDT
             - MNT_USDT
@@ -2599,9 +2600,9 @@ exchanges:
             - SYND_USDT
             - BILLY_USDT
             - GNO_USDT
+            - MNDE_USDT
             - HLG_USDT
             - CLORE_USDT
-            - MNDE_USDT
             - STB_USDT
             - M_USDT
             - GOAT3S_USDT
@@ -2609,13 +2610,13 @@ exchanges:
             - VATRENI_USDT
             - APU_USDT
             - AI16Z_USDT
-            - ZKC_USDT
             - XT_USDT
+            - ZKC_USDT
             - IMAYC_USDT
             - ANLOG_USDT
             - UNCOMMONGOODS_USDT
-            - NANO_USDT
             - STAGE_USDT
+            - NANO_USDT
             - OCTA_USDT
             - ELX_USDT
             - PIXEL_USDT
@@ -2637,14 +2638,14 @@ exchanges:
             - NEAR3L_USDT
             - BABYDOGE_USDT
             - NOBODY_USDT
-            - SCIHUB_USDT
             - BXN_USDT
+            - SCIHUB_USDT
             - XTZ_USDT
             - MDT_USDT
             - PRISM_USDT
             - FOURCOIN_USDT
-            - DOG_USDT
             - DYM_USDT
+            - DOG_USDT
             - BRWL_USDT
             - VOLT_USDT
             - MPLX_USDT
@@ -2751,8 +2752,8 @@ exchanges:
             - ASM_USDT
             - ONC_USDT
             - DAI_USDT
-            - NETT_USDT
             - SUI3S_USDT
+            - NETT_USDT
             - ORT_USDT
             - XNA_USDT
             - WAI_USDT
@@ -2782,14 +2783,14 @@ exchanges:
             - KOMA_USDT
             - MUSIC_USDT
             - OMNIA_USDT
-            - SPICE_USDT
             - SAKE_USDT
+            - SPICE_USDT
             - LUNA_USDT
             - QBX_USDT
             - WAXL_USDT
             - SCA_USDT
-            - UNIBOT_USDT
             - QTUM_USDT
+            - UNIBOT_USDT
             - DOGEGOV_USDT
             - JUICE_USDT
             - ELIZASOL_USDT
@@ -2828,6 +2829,7 @@ exchanges:
             - FIS_USDT
             - MIGGLES_USDT
             - WOO_USDT
+            - DGMA_USDT
             - BMT_USDT
             - HIFI_USDT
             - INJ_USDT
@@ -2860,16 +2862,16 @@ exchanges:
             - INFRA_USDT
             - OORT_USDT
             - POLS_USDT
-            - WLTH_USDT
             - GHIBLI_USDT
+            - WLTH_USDT
             - SYLO_USDT
             - MAIGA_USDT
-            - ASTRA_USDT
             - AMB_USDT
+            - ASTRA_USDT
             - AUTOS_USDT
             - GTC_USDT
-            - SXP_USDT
             - CITY_USDT
+            - SXP_USDT
             - IMT_USDT
             - LBR_USDT
             - PEPE_USDT
@@ -2908,16 +2910,16 @@ exchanges:
             - OPTIMUS_USDT
             - TURBOS_USDT
             - SQUID_USDT
-            - ALEX_USDT
             - ZYRA_USDT
+            - ALEX_USDT
             - PCNT_USDT
             - EDGEN_USDT
             - NEAR3S_USDT
             - NEIROCTO3S_USDT
             - BZZ_USDT
             - USDE_USDT
-            - FRED_USDT
             - COMP_USDT
+            - FRED_USDT
             - AGRI_USDT
             - IMX_USDT
             - TAUR_USDT
@@ -2996,8 +2998,8 @@ exchanges:
             - PNG_USDT
             - ARB3S_USDT
             - NYAN_USDT
-            - EMPIRE_USDT
             - ACH_USDT
+            - EMPIRE_USDT
             - AWT_USDT
             - EIGEN_USDT
             - TSLAX_USDT
@@ -3007,13 +3009,13 @@ exchanges:
             - T23_USDT
             - GNS_USDT
             - GO4_USDT
-            - PSUB_USDT
             - BABAON_USDT
+            - PSUB_USDT
             - MODE_USDT
             - SAKAI_USDT
             - DARK_USDT
-            - KAS5S_USDT
             - HOODX_USDT
+            - KAS5S_USDT
             - LINEA_USDT
             - XCAD_USDT
             - TRX5S_USDT
@@ -3124,8 +3126,8 @@ exchanges:
             - BOSON_USDT
             - USUAL3S_USDT
             - SCR_USDT
-            - OVPP_USDT
             - RPL_USDT
+            - OVPP_USDT
             - SC_USDT
             - NEON_USDT
             - DIVER_USDT
@@ -3195,8 +3197,8 @@ exchanges:
             - RUNWAGO_USDT
             - LISTA_USDT
             - THETA3S_USDT
-            - BUY_USDT
             - ISP_USDT
+            - BUY_USDT
             - QUACK_USDT
             - BICO_USDT
             - HIVP_USDT
@@ -3278,19 +3280,19 @@ exchanges:
             - FARTCOIN5S_USDT
             - LUNAI_USDT
             - RARI_USDT
-            - WHY_USDT
             - SYN_USDT
+            - WHY_USDT
             - BIGTIME_USDT
             - ATLAS_USDT
             - JOC_USDT
             - DNOW_USDT
-            - LF_USDT
             - XYO_USDT
+            - LF_USDT
             - BANK_USDT
             - EPIC_USDT
             - USDC_USDT
-            - ICP_USDT
             - MYRO_USDT
+            - ICP_USDT
             - PEPE3L_USDT
             - SKY_USDT
             - WUF_USDT
@@ -3338,7 +3340,6 @@ exchanges:
             - D_USDT
             - ANIME_USDT
             - TOSHI3S_USDT
-            - COAI_USDT
             - QI_USDT
             - WXT_USDT
             - APE3S_USDT
@@ -3354,8 +3355,8 @@ exchanges:
             - PATRIOT_USDT
             - AI16Z3S_USDT
             - CALCIFY_USDT
-            - MTV_USDT
             - SSG_USDT
+            - MTV_USDT
             - SPS_USDT
             - SERSH_USDT
             - VELO_USDT
@@ -3426,8 +3427,8 @@ exchanges:
             - KAON_USDT
             - BPT_USDT
             - PSB_USDT
-            - VVAIFU_USDT
             - SOLV_USDT
+            - VVAIFU_USDT
             - SHELL_USDT
             - BONK3S_USDT
             - METO_USDT
@@ -3436,8 +3437,8 @@ exchanges:
             - LAYER3S_USDT
             - CHESS_USDT
             - LIQ_USDT
-            - IGU_USDT
             - TRG_USDT
+            - IGU_USDT
             - IN_USDT
             - XPOWER_USDT
             - YOURAI_USDT
@@ -3499,13 +3500,13 @@ exchanges:
             - AURA_USDT
             - BLOK_USDT
             - ARIA_USDT
+            - UB_USDT
             - SAHARA_USDT
             - NODE_USDT
-            - UB_USDT
-            - MED_USDT
             - BLAZE_USDT
-            - VINE_USDT
+            - MED_USDT
             - CRE_USDT
+            - VINE_USDT
             - MSTRON_USDT
             - WOM_USDT
             - WIZZ_USDT
@@ -3516,12 +3517,12 @@ exchanges:
             - TIA_USDT
             - FARTCOIN3L_USDT
             - DERI_USDT
-            - ARIO_USDT
             - CTP_USDT
+            - ARIO_USDT
             - CHEEL_USDT
             - SLF_USDT
-            - LDO3L_USDT
             - BOT_USDT
+            - LDO3L_USDT
             - GHX_USDT
             - MDAO_USDT
             - MBX_USDT
@@ -3639,8 +3640,8 @@ exchanges:
             - XRP5S_USDT
             - L1_USDT
             - BLOCK_USDT
-            - SHIB2_USDT
             - LOVE_USDT
+            - SHIB2_USDT
             - LEASH_USDT
             - PAAL_USDT
             - PRARE_USDT
@@ -3655,9 +3656,9 @@ exchanges:
             - MEPAD_USDT
             - APRS_USDT
             - PEPX_USDT
-            - MAGIC_USDT
-            - CAD_USDT
             - AIN_USDT
+            - CAD_USDT
+            - MAGIC_USDT
             - MIDLE_USDT
             - NFTFI_USDT
             - CWIF_USDT
@@ -3673,8 +3674,8 @@ exchanges:
             - UBXS_USDT
             - TROLL_USDT
             - XTAG_USDT
-            - DHV_USDT
             - WHYPAD_USDT
+            - DHV_USDT
             - LAUNCHCOIN3L_USDT
             - COOKIE_USDT
             - SAI_USDT
@@ -3683,8 +3684,8 @@ exchanges:
             - XDB_USDT
             - WXM_USDT
             - SPYX_USDT
-            - A5S_USDT
             - CATS_USDT
+            - A5S_USDT
             - VELVET_USDT
             - ATK_USDT
             - VINE3S_USDT
@@ -3878,8 +3879,8 @@ exchanges:
             - BTS_USDT
             - EVMOS_USDT
             - KAS3L_USDT
-            - NSDX_USDT
             - O4DX_USDT
+            - NSDX_USDT
             - SNY_USDT
             - SHIB3L_USDT
             - TURBO3S_USDT
@@ -3918,8 +3919,8 @@ exchanges:
             - SOLS_USDT
             - KARRAT_USDT
             - MAG7SSI_USDT
-            - FYN_USDT
             - PDEX_USDT
+            - FYN_USDT
             - SWARMS_USDT
             - CYBER_USDT
             - XION_USDT
@@ -3946,8 +3947,8 @@ exchanges:
             - MULTI_USDT
             - INK_USDT
             - WLFI3L_USDT
-            - BIFI_USDT
             - ITHACA_USDT
+            - BIFI_USDT
             - ZERC_USDT
             - IDV_USDT
             - SOV_USDT
@@ -3974,6 +3975,7 @@ exchanges:
             - SHARDS_USDT
             - SUPRA_USDT
             - NAKA_USDT
+            - GAIN_USDT
             - D2T_USDT
             - ACA_USDT
             - MAK_USDT
@@ -3994,8 +3996,8 @@ exchanges:
             - AOG_USDT
             - HYPER3S_USDT
             - DKA_USDT
-            - SCRT_USDT
             - SEI3S_USDT
+            - SCRT_USDT
             - SWTCH_USDT
             - ELDE_USDT
             - ALU_USDT
@@ -4020,8 +4022,8 @@ exchanges:
             - HERO_USDT
             - QUBIC_USDT
             - SHARE_USDT
-            - UNDEAD_USDT
             - SUSD_USDT
+            - UNDEAD_USDT
             - TRUMP5S_USDT
             - PROPC_USDT
             - SWCH_USDT
@@ -4111,27 +4113,27 @@ exchanges:
             - OBI_USDT
             - AWS_USDT
             - LYP_USDT
-            - BUZZ_USDT
             - DBC_USDT
+            - BUZZ_USDT
             - WZRD_USDT
             - SIDUS_USDT
             - MA_USDT
             - EQX_USDT
             - AVAAI_USDT
             - AVAX3S_USDT
-            - C98_USDT
             - EVERY_USDT
+            - C98_USDT
             - VET3S_USDT
             - MICRO_USDT
             - AZY_USDT
-            - METALDR_USDT
             - UMB_USDT
+            - METALDR_USDT
             - GATA_USDT
             - BGSC_USDT
             - MOTHER_USDT
             - IVPAY_USDT
-            - SHOE_USDT
             - SAPIEN_USDT
+            - SHOE_USDT
             - DMC_USDT
             - GAME2_USDT
             - VSN_USDT
@@ -4146,8 +4148,8 @@ exchanges:
             - AART_USDT
             - KFT_USDT
             - AVAX3L_USDT
-            - VET3L_USDT
             - BLAST_USDT
+            - VET3L_USDT
             - CETUS3L_USDT
             - OAS_USDT
             - BONK_USDT
@@ -4161,10 +4163,10 @@ exchanges:
             - ICX_USDT
             - SDEX_USDT
             - RIZ_USDT
-            - SCARCITY_USDT
             - RINGAI_USDT
-            - ALKIMI_USDT
+            - SCARCITY_USDT
             - VADER_USDT
+            - ALKIMI_USDT
             - TANSSI_USDT
             - CAGA_USDT
             - REI_USDT
@@ -4182,8 +4184,8 @@ exchanges:
             - PLTRON_USDT
             - CPOOL_USDT
             - IBFK_USDT
-            - ASI_USDT
             - BCH5S_USDT
+            - ASI_USDT
             - NACHO_USDT
             - MUBARAK_USDT
             - SNFT1_USDT
@@ -4220,13 +4222,13 @@ exchanges:
             - BAL_USDT
             - CATHEON_USDT
             - LOT_USDT
-            - CYBRO_USDT
             - MOOV_USDT
+            - CYBRO_USDT
             - PAW_USDT
             - XCV_USDT
             - ATOM3S_USDT
-            - GLDX_USDT
             - PYR_USDT
+            - GLDX_USDT
             - SPK3L_USDT
             - MAGATRUMP_USDT
             - SMOLE_USDT
@@ -4246,8 +4248,8 @@ exchanges:
             - ORION_USDT
             - MASK_USDT
             - HOLDSTATION_USDT
-            - FOMO_USDT
             - AVAX_USDT
+            - FOMO_USDT
             - MV_USDT
             - FORA_USDT
             - BUZ_USDT
@@ -4272,8 +4274,8 @@ exchanges:
             - STIX_USDT
             - RUNE3S_USDT
             - FAIR3_USDT
-            - ART_USDT
             - OVL_USDT
+            - ART_USDT
             - PNUT3L_USDT
             - COOK_USDT
             - LAIR_USDT
@@ -4306,8 +4308,8 @@ exchanges:
             - FEAR_USDT
             - SQR_USDT
             - CGPU_USDT
-            - HRT_USDT
             - ELF_USDT
+            - HRT_USDT
             - ZEUM_USDT
             - CAMP_USDT
             - A3S_USDT
@@ -4329,8 +4331,8 @@ exchanges:
             - HOODON_USDT
             - KAITO_USDT
             - WAGMIGAMES_USDT
-            - BOA_USDT
             - OXY_USDT
+            - BOA_USDT
             - VGX_USDT
             - NIKO_USDT
             - GARI_USDT
@@ -4357,11 +4359,11 @@ exchanges:
             - FOXSY_USDT
             - ANIME3S_USDT
             - LAI_USDT
-            - AM_USDT
             - HOUSE_USDT
+            - AM_USDT
             - DFA_USDT
-            - USD1_USDT
             - YFI_USDT
+            - USD1_USDT
             - BAN_USDT
             - LRN_USDT
             - NUMI_USDT
@@ -4393,12 +4395,12 @@ exchanges:
             - ZK_USDT
             - DOOD_USDT
             - PORT3_USDT
-            - SOULS_USDT
             - MTG_USDT
+            - SOULS_USDT
             - KNINE_USDT
             - ALPACA_USDT
-            - HIVE_USDT
             - CSKY_USDT
+            - HIVE_USDT
             - ADA5S_USDT
             - RSS3_USDT
             - FWOG_USDT
@@ -4411,8 +4413,8 @@ exchanges:
             - OLA_USDT
             - MANTA_USDT
             - BLD_USDT
-            - RAI_USDT
             - INTER_USDT
+            - RAI_USDT
             - WALLET_USDT
             - MOB_USDT
             - DORA_USDT
@@ -4469,10 +4471,10 @@ exchanges:
             - MOZ_USDT
             - HXD_USDT
             - BRIC_USDT
-            - CAW_USDT
-            - FRONTIERS_USDT
-            - BCH_USDT
             - BICITY_USDT
+            - CAW_USDT
+            - BCH_USDT
+            - FRONTIERS_USDT
             - PUNDU_USDT
             - ELP_USDT
             - ASP_USDT
@@ -4505,8 +4507,8 @@ exchanges:
             - TLOS_USDT
             - BMEX_USDT
             - TEDDY_USDT
-            - DBR_USDT
             - FIL5L_USDT
+            - DBR_USDT
             - DATA_USDT
             - AAVE_USDT
             - DOGNFT_USDT
@@ -4554,8 +4556,8 @@ exchanges:
             - DAO_USDT
             - GOZ_USDT
             - CEUR_USDT
-            - BEFI_USDT
             - APT5L_USDT
+            - BEFI_USDT
             - DEXE_USDT
             - UNI5L_USDT
             - SUPER_USDT
@@ -4577,8 +4579,8 @@ exchanges:
             - WEAR_USDT
             - XPR_USDT
             - CTC_USDT
-            - MMT_USDT
             - TBC_USDT
+            - MMT_USDT
             - TOKEN_USDT
             - SGB_USDT
             - 10SET_USDT
@@ -4592,8 +4594,8 @@ exchanges:
             - SAND3S_USDT
             - RUNECOIN_USDT
             - SAGA_USDT
-            - STOC_USDT
             - BNB3S_USDT
+            - STOC_USDT
             - MELD_USDT
             - SUIAI_USDT
             - ICE_USDT
@@ -5218,7 +5220,8 @@ exchanges:
             - SUI_USDT
             - METAX_USDT
             - EGLD_USDT
-        last_updated: 2025-09-24T20:54:49.887670627+09:00
+            - COAI_USDT
+        last_updated: 2025-09-25T19:09:43.022435468+09:00
     kucoin:
         spot_endpoint: wss://ws-api.kucoin.com/endpoint
         futures_endpoint: wss://ws-api-futures.kucoin.com/endpoint
@@ -5863,6 +5866,7 @@ exchanges:
             - NLK-USDT
             - NOT-USDT
             - SQD-USDT
+            - MONPRO-USDT
             - WLTH-USDT
             - TAIKO-USDT
             - ULTI-USDT
@@ -6297,10 +6301,14 @@ exchanges:
             - PORTALS-USDT
             - MAIGA-USDT
             - RUNWAGO-USDT
+            - BARD-USDT
             - NUMI-USDT
             - SYND-USDT
             - 0G-USDT
             - ASTER-USDT
+            - PIN-USDT
+            - STBL-USDT
+            - BSU-USDT
         futures_symbols:
             - XBTUSDTM
             - ETHUSDTM
@@ -6422,6 +6430,7 @@ exchanges:
             - CHRUSDTM
             - CHZUSDTM
             - CKBUSDTM
+            - COAIUSDTM
             - COMPUSDTM
             - COOKIEUSDTM
             - COTIUSDTM
@@ -6791,7 +6800,7 @@ exchanges:
             - ZRCUSDTM
             - ZROUSDTM
             - ZRXUSDTM
-        last_updated: 2025-09-24T20:54:49.145347121+09:00
+        last_updated: 2025-09-25T19:09:42.509614983+09:00
     okx:
         spot_endpoint: wss://ws.okx.com:8443/ws/v5/public
         futures_endpoint: wss://ws.okx.com:8443/ws/v5/public
@@ -7334,7 +7343,7 @@ exchanges:
             - ZK-USDT-SWAP
             - ZRO-USDT-SWAP
             - ZRX-USDT-SWAP
-        last_updated: 2025-09-24T20:54:48.852984227+09:00
+        last_updated: 2025-09-25T19:09:42.204737573+09:00
     phemex:
         spot_endpoint: wss://ws.phemex.com
         futures_endpoint: wss://ws.phemex.com
@@ -7343,7 +7352,7 @@ exchanges:
         max_retries: 3
         spot_symbols: []
         futures_symbols: []
-        last_updated: 2025-09-24T20:54:49.145368611+09:00
+        last_updated: 2025-09-25T19:09:42.509631144+09:00
 subscription_lists:
     binance_futures:
         - LTCUSDT
@@ -7684,6 +7693,7 @@ subscription_lists:
         - ASTERUSDT
         - TRADOORUSDT
         - BLESSUSDT
+        - COAIUSDT
     binance_spot:
         - BNBUSDT
         - LTCUSDT
@@ -8278,7 +8288,6 @@ subscription_lists:
         - SDUSDT
         - SENDUSDT
         - SERAPHUSDT
-        - SFPUSDT
     bybit_spot:
         - LTCUSDT
         - DYDXUSDT
@@ -9083,6 +9092,7 @@ subscription_lists:
         - RSS3_USDT
         - B2_USDT
         - METAX_USDT
+        - COAI_USDT
     gate_spot:
         - ALEPH_USDT
         - ORNJ_USDT
@@ -9141,8 +9151,8 @@ subscription_lists:
         - TA_USDT
         - AIVA_USDT
         - ACNX_USDT
-        - AKUMA_USDT
         - KSM_USDT
+        - AKUMA_USDT
         - DOGE3S_USDT
         - NOS_USDT
         - ONE_USDT
@@ -9177,8 +9187,8 @@ subscription_lists:
         - ATA_USDT
         - BEFE_USDT
         - MAHA_USDT
-        - EMYC_USDT
         - VOXEL_USDT
+        - EMYC_USDT
         - AVGOX_USDT
         - VLR_USDT
         - SQT_USDT
@@ -9200,8 +9210,8 @@ subscription_lists:
         - LAVA_USDT
         - MILO_USDT
         - UNIT0_USDT
-        - DOT5L_USDT
         - NCN_USDT
+        - DOT5L_USDT
         - BABYNEIRO_USDT
         - TRADE_USDT
         - TSLAON_USDT
@@ -9210,13 +9220,13 @@ subscription_lists:
         - GZONE_USDT
         - MOVE3L_USDT
         - SUNDOG_USDT
-        - ETN_USDT
         - PUNDIAI_USDT
+        - ETN_USDT
         - NAFT_USDT
         - GMX_USDT
         - XEN_USDT
-        - SBETON_USDT
         - KCT_USDT
+        - SBETON_USDT
         - QORPO_USDT
         - FAST_USDT
         - ZODI_USDT
@@ -9237,8 +9247,8 @@ subscription_lists:
         - KAS3S_USDT
         - FRIEND_USDT
         - THETA3L_USDT
-        - LOOKS_USDT
         - 3ULL_USDT
+        - LOOKS_USDT
         - ETH3L_USDT
         - SEAT_USDT
         - SIREN_USDT
@@ -9276,12 +9286,12 @@ subscription_lists:
         - ES_USDT
         - TICO_USDT
         - PEPE5S_USDT
-        - ZBCN3S_USDT
         - FB_USDT
+        - ZBCN3S_USDT
         - PEOPLEFB_USDT
         - ZP_USDT
-        - PERP_USDT
         - CELB_USDT
+        - PERP_USDT
         - ZIG_USDT
         - GALA_USDT
         - LLT_USDT
@@ -9303,8 +9313,8 @@ subscription_lists:
         - EGAME_USDT
         - FOR_USDT
         - APT5S_USDT
-        - EURT_USDT
         - RBTC_USDT
+        - EURT_USDT
         - NFP_USDT
         - EYWA_USDT
         - PURR_USDT
@@ -9313,11 +9323,11 @@ subscription_lists:
         - GRIFFAIN_USDT
         - NEIROETH_USDT
         - POND_USDT
-        - UNFI_USDT
         - MUSE_USDT
-        - YFDAI_USDT
-        - SAND3L_USDT
+        - UNFI_USDT
         - GAMESTARTER_USDT
+        - SAND3L_USDT
+        - YFDAI_USDT
         - WLFI3S_USDT
         - VEMP_USDT
         - FITFI_USDT
@@ -9374,8 +9384,8 @@ subscription_lists:
         - REX_USDT
         - BEES_USDT
         - JANET_USDT
-        - AINN_USDT
         - SSV_USDT
+        - AINN_USDT
         - MAF_USDT
         - ZKWASM_USDT
         - TRB3L_USDT
@@ -9440,8 +9450,8 @@ subscription_lists:
         - MPH_USDT
         - MUBI_USDT
         - BOTIFY_USDT
-        - EIGEN3L_USDT
         - WNDR_USDT
+        - EIGEN3L_USDT
         - MITO_USDT
         - WLD5S_USDT
         - SUIRWAPIN_USDT
@@ -9463,8 +9473,8 @@ subscription_lists:
         - SWAP_USDT
         - PIPPIN_USDT
         - BSCPAD_USDT
-        - SNX_USDT
         - DUCK_USDT
+        - SNX_USDT
         - BID_USDT
         - ZAT_USDT
         - GPT_USDT
@@ -9482,8 +9492,8 @@ subscription_lists:
         - MAGA_USDT
         - SNPT_USDT
         - KAITO3S_USDT
-        - DIONE_USDT
         - L3_USDT
+        - DIONE_USDT
         - VTG_USDT
         - ALPH_USDT
         - APE_USDT
@@ -9495,8 +9505,8 @@ subscription_lists:
         - KIP_USDT
         - POP_USDT
         - SHIB5S_USDT
-        - VDR_USDT
         - ALI_USDT
+        - VDR_USDT
         - CLV_USDT
         - OWN_USDT
         - SEAL_USDT
@@ -9520,9 +9530,9 @@ subscription_lists:
         - SYND_USDT
         - BILLY_USDT
         - GNO_USDT
+        - MNDE_USDT
         - HLG_USDT
         - CLORE_USDT
-        - MNDE_USDT
         - STB_USDT
         - M_USDT
         - GOAT3S_USDT
@@ -9534,8 +9544,8 @@ subscription_lists:
         - IMAYC_USDT
         - ANLOG_USDT
         - UNCOMMONGOODS_USDT
-        - NANO_USDT
         - STAGE_USDT
+        - NANO_USDT
         - OCTA_USDT
         - ELX_USDT
         - PIXEL_USDT
@@ -9557,13 +9567,13 @@ subscription_lists:
         - NEAR3L_USDT
         - BABYDOGE_USDT
         - NOBODY_USDT
-        - SCIHUB_USDT
         - BXN_USDT
+        - SCIHUB_USDT
         - MDT_USDT
         - PRISM_USDT
         - FOURCOIN_USDT
-        - DOG_USDT
         - DYM_USDT
+        - DOG_USDT
         - BRWL_USDT
         - VOLT_USDT
         - MPLX_USDT
@@ -9664,8 +9674,8 @@ subscription_lists:
         - ASM_USDT
         - ONC_USDT
         - DAI_USDT
-        - NETT_USDT
         - SUI3S_USDT
+        - NETT_USDT
         - ORT_USDT
         - XNA_USDT
         - WAI_USDT
@@ -9693,8 +9703,8 @@ subscription_lists:
         - KOMA_USDT
         - MUSIC_USDT
         - OMNIA_USDT
-        - SPICE_USDT
         - SAKE_USDT
+        - SPICE_USDT
         - LUNA_USDT
         - QBX_USDT
         - WAXL_USDT
@@ -9732,6 +9742,7 @@ subscription_lists:
         - FIS_USDT
         - MIGGLES_USDT
         - WOO_USDT
+        - DGMA_USDT
         - BMT_USDT
         - HIFI_USDT
         - BATCH_USDT
@@ -9758,12 +9769,12 @@ subscription_lists:
         - INFRA_USDT
         - OORT_USDT
         - POLS_USDT
-        - WLTH_USDT
         - GHIBLI_USDT
+        - WLTH_USDT
         - SYLO_USDT
         - MAIGA_USDT
-        - ASTRA_USDT
         - AMB_USDT
+        - ASTRA_USDT
         - AUTOS_USDT
         - GTC_USDT
         - CITY_USDT
@@ -9801,8 +9812,8 @@ subscription_lists:
         - OPTIMUS_USDT
         - TURBOS_USDT
         - SQUID_USDT
-        - ALEX_USDT
         - ZYRA_USDT
+        - ALEX_USDT
         - PCNT_USDT
         - EDGEN_USDT
         - NEAR3S_USDT
@@ -9881,8 +9892,8 @@ subscription_lists:
         - PNG_USDT
         - ARB3S_USDT
         - NYAN_USDT
-        - EMPIRE_USDT
         - ACH_USDT
+        - EMPIRE_USDT
         - AWT_USDT
         - EIGEN_USDT
         - TSLAX_USDT
@@ -9892,13 +9903,13 @@ subscription_lists:
         - T23_USDT
         - GNS_USDT
         - GO4_USDT
-        - PSUB_USDT
         - BABAON_USDT
+        - PSUB_USDT
         - MODE_USDT
         - SAKAI_USDT
         - DARK_USDT
-        - KAS5S_USDT
         - HOODX_USDT
+        - KAS5S_USDT
         - XCAD_USDT
         - TRX5S_USDT
         - BCCOIN_USDT
@@ -10001,8 +10012,8 @@ subscription_lists:
         - BOSON_USDT
         - USUAL3S_USDT
         - SCR_USDT
-        - OVPP_USDT
         - RPL_USDT
+        - OVPP_USDT
         - NEON_USDT
         - DIVER_USDT
         - PNDO_USDT
@@ -10069,8 +10080,8 @@ subscription_lists:
         - RUNWAGO_USDT
         - LISTA_USDT
         - THETA3S_USDT
-        - BUY_USDT
         - ISP_USDT
+        - BUY_USDT
         - QUACK_USDT
         - BICO_USDT
         - HIVP_USDT
@@ -10146,17 +10157,17 @@ subscription_lists:
         - FARTCOIN5S_USDT
         - LUNAI_USDT
         - RARI_USDT
-        - WHY_USDT
         - SYN_USDT
+        - WHY_USDT
         - ATLAS_USDT
         - JOC_USDT
         - DNOW_USDT
-        - LF_USDT
         - XYO_USDT
+        - LF_USDT
         - BANK_USDT
         - EPIC_USDT
-        - ICP_USDT
         - MYRO_USDT
+        - ICP_USDT
         - PEPE3L_USDT
         - SKY_USDT
         - WUF_USDT
@@ -10199,7 +10210,6 @@ subscription_lists:
         - RCADE_USDT
         - D_USDT
         - TOSHI3S_USDT
-        - COAI_USDT
         - QI_USDT
         - WXT_USDT
         - APE3S_USDT
@@ -10215,8 +10225,8 @@ subscription_lists:
         - PATRIOT_USDT
         - AI16Z3S_USDT
         - CALCIFY_USDT
-        - MTV_USDT
         - SSG_USDT
+        - MTV_USDT
         - SPS_USDT
         - SERSH_USDT
         - VELO_USDT
@@ -10282,8 +10292,8 @@ subscription_lists:
         - KAON_USDT
         - BPT_USDT
         - PSB_USDT
-        - VVAIFU_USDT
         - SOLV_USDT
+        - VVAIFU_USDT
         - SHELL_USDT
         - BONK3S_USDT
         - METO_USDT
@@ -10292,8 +10302,8 @@ subscription_lists:
         - LAYER3S_USDT
         - CHESS_USDT
         - LIQ_USDT
-        - IGU_USDT
         - TRG_USDT
+        - IGU_USDT
         - IN_USDT
         - XPOWER_USDT
         - YOURAI_USDT
@@ -10351,11 +10361,11 @@ subscription_lists:
         - AURA_USDT
         - BLOK_USDT
         - ARIA_USDT
-        - NODE_USDT
         - UB_USDT
+        - NODE_USDT
         - BLAZE_USDT
-        - VINE_USDT
         - CRE_USDT
+        - VINE_USDT
         - MSTRON_USDT
         - WOM_USDT
         - WIZZ_USDT
@@ -10365,12 +10375,12 @@ subscription_lists:
         - RAGE_USDT
         - FARTCOIN3L_USDT
         - DERI_USDT
-        - ARIO_USDT
         - CTP_USDT
+        - ARIO_USDT
         - CHEEL_USDT
         - SLF_USDT
-        - LDO3L_USDT
         - BOT_USDT
+        - LDO3L_USDT
         - GHX_USDT
         - MDAO_USDT
         - MBX_USDT
@@ -10480,8 +10490,8 @@ subscription_lists:
         - XRP5S_USDT
         - L1_USDT
         - BLOCK_USDT
-        - SHIB2_USDT
         - LOVE_USDT
+        - SHIB2_USDT
         - LEASH_USDT
         - PAAL_USDT
         - PRARE_USDT
@@ -10496,9 +10506,9 @@ subscription_lists:
         - MEPAD_USDT
         - APRS_USDT
         - PEPX_USDT
-        - MAGIC_USDT
-        - CAD_USDT
         - AIN_USDT
+        - CAD_USDT
+        - MAGIC_USDT
         - MIDLE_USDT
         - NFTFI_USDT
         - CWIF_USDT
@@ -10513,8 +10523,8 @@ subscription_lists:
         - UBXS_USDT
         - TROLL_USDT
         - XTAG_USDT
-        - DHV_USDT
         - WHYPAD_USDT
+        - DHV_USDT
         - LAUNCHCOIN3L_USDT
         - COOKIE_USDT
         - SAI_USDT
@@ -10522,8 +10532,8 @@ subscription_lists:
         - XDB_USDT
         - WXM_USDT
         - SPYX_USDT
-        - A5S_USDT
         - CATS_USDT
+        - A5S_USDT
         - VELVET_USDT
         - ATK_USDT
         - VINE3S_USDT
@@ -10700,8 +10710,8 @@ subscription_lists:
         - BTS_USDT
         - EVMOS_USDT
         - KAS3L_USDT
-        - NSDX_USDT
         - O4DX_USDT
+        - NSDX_USDT
         - SNY_USDT
         - SHIB3L_USDT
         - TURBO3S_USDT
@@ -10740,8 +10750,8 @@ subscription_lists:
         - SOLS_USDT
         - KARRAT_USDT
         - MAG7SSI_USDT
-        - FYN_USDT
         - PDEX_USDT
+        - FYN_USDT
         - SWARMS_USDT
         - XION_USDT
         - GOUT_USDT
@@ -10766,8 +10776,8 @@ subscription_lists:
         - MULTI_USDT
         - INK_USDT
         - WLFI3L_USDT
-        - BIFI_USDT
         - ITHACA_USDT
+        - BIFI_USDT
         - ZERC_USDT
         - IDV_USDT
         - SOV_USDT
@@ -10792,6 +10802,7 @@ subscription_lists:
         - SHARDS_USDT
         - SUPRA_USDT
         - NAKA_USDT
+        - GAIN_USDT
         - D2T_USDT
         - ACA_USDT
         - MAK_USDT
@@ -10810,8 +10821,8 @@ subscription_lists:
         - CULT_USDT
         - AOG_USDT
         - HYPER3S_USDT
-        - SCRT_USDT
         - SEI3S_USDT
+        - SCRT_USDT
         - SWTCH_USDT
         - ELDE_USDT
         - ALU_USDT
@@ -10834,8 +10845,8 @@ subscription_lists:
         - HERO_USDT
         - QUBIC_USDT
         - SHARE_USDT
-        - UNDEAD_USDT
         - SUSD_USDT
+        - UNDEAD_USDT
         - TRUMP5S_USDT
         - PROPC_USDT
         - SWCH_USDT
@@ -10920,27 +10931,27 @@ subscription_lists:
         - OBI_USDT
         - AWS_USDT
         - LYP_USDT
-        - BUZZ_USDT
         - DBC_USDT
+        - BUZZ_USDT
         - WZRD_USDT
         - SIDUS_USDT
         - MA_USDT
         - EQX_USDT
         - AVAAI_USDT
         - AVAX3S_USDT
-        - C98_USDT
         - EVERY_USDT
+        - C98_USDT
         - VET3S_USDT
         - MICRO_USDT
         - AZY_USDT
-        - METALDR_USDT
         - UMB_USDT
+        - METALDR_USDT
         - GATA_USDT
         - BGSC_USDT
         - MOTHER_USDT
         - IVPAY_USDT
-        - SHOE_USDT
         - SAPIEN_USDT
+        - SHOE_USDT
         - DMC_USDT
         - VSN_USDT
         - WILD_USDT
@@ -10965,10 +10976,10 @@ subscription_lists:
         - SPFC_USDT
         - SDEX_USDT
         - RIZ_USDT
-        - SCARCITY_USDT
         - RINGAI_USDT
-        - ALKIMI_USDT
+        - SCARCITY_USDT
         - VADER_USDT
+        - ALKIMI_USDT
         - TANSSI_USDT
         - CAGA_USDT
         - REI_USDT
@@ -10985,8 +10996,8 @@ subscription_lists:
         - PLTRON_USDT
         - CPOOL_USDT
         - IBFK_USDT
-        - ASI_USDT
         - BCH5S_USDT
+        - ASI_USDT
         - NACHO_USDT
         - MUBARAK_USDT
         - SNFT1_USDT
@@ -11021,13 +11032,13 @@ subscription_lists:
         - BAL_USDT
         - CATHEON_USDT
         - LOT_USDT
-        - CYBRO_USDT
         - MOOV_USDT
+        - CYBRO_USDT
         - PAW_USDT
         - XCV_USDT
         - ATOM3S_USDT
-        - GLDX_USDT
         - PYR_USDT
+        - GLDX_USDT
         - SPK3L_USDT
         - MAGATRUMP_USDT
         - SMOLE_USDT
@@ -11067,8 +11078,8 @@ subscription_lists:
         - STIX_USDT
         - RUNE3S_USDT
         - FAIR3_USDT
-        - ART_USDT
         - OVL_USDT
+        - ART_USDT
         - PNUT3L_USDT
         - COOK_USDT
         - LAIR_USDT
@@ -11119,8 +11130,8 @@ subscription_lists:
         - WAMPL_USDT
         - HOODON_USDT
         - WAGMIGAMES_USDT
-        - BOA_USDT
         - OXY_USDT
+        - BOA_USDT
         - VGX_USDT
         - NIKO_USDT
         - GARI_USDT
@@ -11145,8 +11156,8 @@ subscription_lists:
         - FOXSY_USDT
         - ANIME3S_USDT
         - LAI_USDT
-        - AM_USDT
         - HOUSE_USDT
+        - AM_USDT
         - DFA_USDT
         - YFI_USDT
         - BAN_USDT
@@ -11176,8 +11187,8 @@ subscription_lists:
         - ZK_USDT
         - DOOD_USDT
         - PORT3_USDT
-        - SOULS_USDT
         - MTG_USDT
+        - SOULS_USDT
         - KNINE_USDT
         - ALPACA_USDT
         - CSKY_USDT
@@ -11193,8 +11204,8 @@ subscription_lists:
         - OLA_USDT
         - MANTA_USDT
         - BLD_USDT
-        - RAI_USDT
         - INTER_USDT
+        - RAI_USDT
         - WALLET_USDT
         - MOB_USDT
         - DORA_USDT
@@ -11248,9 +11259,9 @@ subscription_lists:
         - MOZ_USDT
         - HXD_USDT
         - BRIC_USDT
+        - BICITY_USDT
         - CAW_USDT
         - FRONTIERS_USDT
-        - BICITY_USDT
         - PUNDU_USDT
         - ELP_USDT
         - ASP_USDT
@@ -11281,8 +11292,8 @@ subscription_lists:
         - TLOS_USDT
         - BMEX_USDT
         - TEDDY_USDT
-        - DBR_USDT
         - FIL5L_USDT
+        - DBR_USDT
         - DATA_USDT
         - DOGNFT_USDT
         - WUSD_USDT
@@ -11324,8 +11335,8 @@ subscription_lists:
         - DAO_USDT
         - GOZ_USDT
         - CEUR_USDT
-        - BEFI_USDT
         - APT5L_USDT
+        - BEFI_USDT
         - DEXE_USDT
         - UNI5L_USDT
         - SUPER_USDT
@@ -11344,8 +11355,8 @@ subscription_lists:
         - MOODENG3L_USDT
         - WEAR_USDT
         - XPR_USDT
-        - MMT_USDT
         - TBC_USDT
+        - MMT_USDT
         - TOKEN_USDT
         - SGB_USDT
         - 10SET_USDT
@@ -11358,8 +11369,8 @@ subscription_lists:
         - SAND3S_USDT
         - RUNECOIN_USDT
         - SAGA_USDT
-        - STOC_USDT
         - BNB3S_USDT
+        - STOC_USDT
         - MELD_USDT
         - SUIAI_USDT
         - ICE_USDT
@@ -11500,6 +11511,7 @@ subscription_lists:
         - CHRUSDTM
         - CHZUSDTM
         - CKBUSDTM
+        - COAIUSDTM
         - COMPUSDTM
         - COOKIEUSDTM
         - COTIUSDTM
@@ -12385,6 +12397,7 @@ subscription_lists:
         - NLK-USDT
         - NOT-USDT
         - SQD-USDT
+        - MONPRO-USDT
         - WLTH-USDT
         - ULTI-USDT
         - LKI-USDT
@@ -12773,6 +12786,9 @@ subscription_lists:
         - NUMI-USDT
         - SYND-USDT
         - ASTER-USDT
+        - PIN-USDT
+        - STBL-USDT
+        - BSU-USDT
     okx_futures:
         - OKB-USDT-SWAP
         - ACE-USDT-SWAP

@@ -1,4 +1,4 @@
-# METDC v2.0 System Configuration
+# PumpWatch v2.0 System Configuration
 
 # Server settings
 server:
@@ -10,9 +10,9 @@ server:
 upbit:
   enabled: true
   api_url: "https://api-manager.upbit.com/api/v1/announcements?os=web&page=1&per_page=20&category=trade"
-  poll_interval: "5s" 
+  poll_interval: "5s"
   timeout: "10s"
-  user_agent: "METDC-v2.0"
+  user_agent: "PumpWatch-v2.0"
 
 # Exchange WebSocket configurations
 exchanges:

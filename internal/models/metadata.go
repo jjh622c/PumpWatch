@@ -22,7 +22,7 @@ type ListingMetadata struct {
 	// 메타데이터
 	CreatedAt   time.Time `json:"created_at"`   // 수집 시작 시간
 	CompletedAt time.Time `json:"completed_at"` // 수집 완료 시간
-	Version     string    `json:"version"`      // METDC 버전
+	Version     string    `json:"version"`      // PumpWatch 버전
 }
 
 // ExchangeStats는 거래소별 수집 통계
@@ -52,7 +52,7 @@ func NewListingMetadata(symbol string, listingTime int64) *ListingMetadata {
 		Markets:         make([]string, 0),
 		Exchanges:       make(map[string]ExchangeStats),
 		CreatedAt:       time.Now(),
-		Version:         "METDC-v2.0",
+		Version:         "PumpWatch-v2.0",
 	}
 }
 

@@ -14,7 +14,7 @@ import (
 )
 
 // PumpAnalyzer detects and analyzes pump events from trade data
-// Following METDC v2.0 pump detection algorithm: >3% price increases in 1-second windows
+// Following PumpWatch v2.0 pump detection algorithm: >3% price increases in 1-second windows
 type PumpAnalyzer struct {
 	// Configuration
 	minPumpPercentage float64       // Minimum pump percentage (default: 3.0%)
