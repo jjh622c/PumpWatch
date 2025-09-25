@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # PumpWatch v2.0 통합 실행 스크립트
 # QuestDB 자동 시작 + 30분 하드리셋 기능 포함
