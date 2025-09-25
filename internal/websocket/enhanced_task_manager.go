@@ -10,6 +10,7 @@ import (
 	"PumpWatch/internal/analyzer"
 	"PumpWatch/internal/buffer"
 	"PumpWatch/internal/config"
+	"PumpWatch/internal/database"
 	"PumpWatch/internal/logging"
 	"PumpWatch/internal/models"
 	"PumpWatch/internal/recovery"
@@ -28,6 +29,10 @@ type EnhancedTaskManager struct {
 	storageManager  *storage.Manager
 	pumpAnalyzer    *analyzer.PumpAnalyzer
 	circularBuffer  *buffer.CircularTradeBuffer
+
+	// QuestDB 고성능 데이터베이스 배치 처리 시스템
+	questDBManager  *database.QuestDBManager
+	questDBConfig   config.QuestDBConfig
 
 	// Multi-worker connection management
 	workerPools map[string]*WorkerPool // key: "exchange_markettype"
@@ -82,7 +87,7 @@ type ExchangeStats struct {
 }
 
 // NewEnhancedTaskManager creates a new enhanced WebSocket task manager with multi-worker support
-func NewEnhancedTaskManager(ctx context.Context, exchangesConfig config.ExchangesConfig, symbolsConfig *symbols.SymbolsConfig, storageManager *storage.Manager) (*EnhancedTaskManager, error) {
+func NewEnhancedTaskManager(ctx context.Context, exchangesConfig config.ExchangesConfig, symbolsConfig *symbols.SymbolsConfig, storageManager *storage.Manager, questDBConfig config.QuestDBConfig) (*EnhancedTaskManager, error) {
 	taskCtx, cancel := context.WithCancel(ctx)
 
 	tm := &EnhancedTaskManager{
@@ -95,6 +100,7 @@ func NewEnhancedTaskManager(ctx context.Context, exchangesConfig config.Exchange
 		circularBuffer:  buffer.NewCircularTradeBuffer(taskCtx),
 		workerPools:     make(map[string]*WorkerPool),
 		logger:          logging.GetGlobalLogger(),
+		questDBConfig:   questDBConfig,
 		stats: EnhancedTaskManagerStats{
 			LastHealthCheck: time.Now(),
 			ExchangeStats:   make(map[string]ExchangeStats),
@@ -106,6 +112,42 @@ func NewEnhancedTaskManager(ctx context.Context, exchangesConfig config.Exchange
 		tm.logger.Warn("⚠️ CircularBuffer 백업 복원 실패 (정상 시작): %v", err)
 	} else {
 		tm.logger.Info("✅ CircularBuffer 백업 복원 완료 (하드리셋 복구)")
+	}
+
+	// Initialize QuestDB if enabled (Phase 2 고성능 배치 처리)
+	if questDBConfig.Enabled {
+		tm.logger.Info("🚀 Initializing QuestDB high-performance batch processing system...")
+
+		// 문서 사양대로 QuestDBManagerConfig 생성
+		questManagerConfig := database.QuestDBManagerConfig{
+			Host:            questDBConfig.Host,
+			Port:            questDBConfig.Port,
+			Database:        questDBConfig.Database,
+			User:            questDBConfig.User,
+			Password:        questDBConfig.Password,
+			BatchSize:       questDBConfig.BatchSize,
+			FlushInterval:   questDBConfig.FlushInterval,
+			BufferSize:      questDBConfig.BufferSize,
+			WorkerCount:     questDBConfig.WorkerCount,
+			MaxOpenConns:    questDBConfig.MaxOpenConns,
+			MaxIdleConns:    questDBConfig.MaxIdleConns,
+			ConnMaxLifetime: questDBConfig.ConnMaxLifetime,
+			MaxRetries:      questDBConfig.MaxRetries,
+			BaseDelay:       questDBConfig.BaseDelay,
+			MaxDelay:        questDBConfig.MaxDelay,
+			BackoffFactor:   questDBConfig.BackoffFactor,
+		}
+
+		var err error
+		tm.questDBManager, err = database.NewQuestDBManager(questManagerConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize QuestDB manager: %w", err)
+		}
+
+		tm.logger.Info("✅ QuestDB manager initialized: %d workers, batch=%d, buffer=%d",
+			questManagerConfig.WorkerCount, questManagerConfig.BatchSize, questManagerConfig.BufferSize)
+	} else {
+		tm.logger.Info("⚠️ QuestDB disabled - using legacy storage system only")
 	}
 
 	// Initialize intelligent error recovery system
@@ -256,6 +298,20 @@ func (tm *EnhancedTaskManager) handleTradeEvent(exchange, marketType string, tra
 		tm.storeTradeEvent(exchange, marketType, &tradeEvent)
 	}
 	tm.collectionMu.RUnlock()
+
+	// 🚀 Phase 2: QuestDB 고성능 배치 처리 시스템 통합
+	if tm.questDBManager != nil {
+		// 하이브리드 모드: 기존 시스템과 병렬로 QuestDB에도 저장
+		if success := tm.questDBManager.AddTrade(tradeEvent); !success {
+			// 채널이 가득 찬 경우 메트릭만 업데이트 (로그 생략으로 성능 최적화)
+			tm.statsMu.Lock()
+			if exchangeStats, exists := tm.stats.ExchangeStats[exchange]; exists {
+				exchangeStats.ErrorRate += 0.001 // 미미한 에러율 증가
+				tm.stats.ExchangeStats[exchange] = exchangeStats
+			}
+			tm.statsMu.Unlock()
+		}
+	}
 }
 
 // storeTradeEvent stores trade event using CollectionEvent.AddTrade() with proper time filtering
@@ -354,6 +410,22 @@ func (tm *EnhancedTaskManager) Stop() error {
 		tm.logger.Info("🛑 Closing CircularTradeBuffer")
 		if err := tm.circularBuffer.Close(); err != nil {
 			tm.logger.Error("❌ Failed to close CircularTradeBuffer: %v", err)
+		}
+	}
+
+	// 🔌 Stop QuestDB Manager (graceful shutdown with statistics)
+	if tm.questDBManager != nil {
+		tm.logger.Info("🛑 Shutting down QuestDB Manager...")
+
+		// 통계 출력 (Phase 2 성과 확인)
+		stats := tm.questDBManager.GetStats()
+		tm.logger.Info("📊 QuestDB Final Stats: Batches=%d, Trades=%d, Failed=%d, Dropped=%d",
+			stats.BatchesProcessed, stats.TotalTrades, stats.FailedBatches, stats.DroppedTrades)
+
+		if err := tm.questDBManager.Close(); err != nil {
+			tm.logger.Error("❌ Failed to close QuestDB Manager: %v", err)
+		} else {
+			tm.logger.Info("✅ QuestDB Manager gracefully stopped")
 		}
 	}
 
@@ -459,6 +531,29 @@ func (tm *EnhancedTaskManager) StartDataCollection(symbol string, triggerTime ti
 	}
 
 	tm.logger.Info("📊 Total extracted: %d trades from CircularBuffer", totalExtracted)
+
+	// 🚀 Phase 4: Store listing event in QuestDB
+	if tm.questDBManager != nil {
+		listingEvent := &models.ListingEvent{
+			Symbol:       symbol,
+			Title:        fmt.Sprintf("%s 상장 이벤트", symbol),
+			Markets:      []string{"KRW"},
+			AnnouncedAt:  triggerTime,
+			DetectedAt:   detectedTime,
+			TriggerTime:  triggerTime,
+			NoticeURL:    "internal://pumpwatch",
+			IsKRWListing: true,
+		}
+
+		// QuestDB manager를 통해 상장 이벤트 저장
+		go func() {
+			if err := tm.questDBManager.InsertListingEvent(listingEvent); err != nil {
+				tm.logger.Error("📊 Failed to store listing event in QuestDB: %v", err)
+			} else {
+				tm.logger.Info("📊 Listing event stored in QuestDB: %s", symbol)
+			}
+		}()
+	}
 
 	// Save data immediately (no waiting for collection completion)
 	go func() {

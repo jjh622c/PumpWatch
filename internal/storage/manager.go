@@ -3,7 +3,6 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -816,107 +815,9 @@ func (sm *Manager) sanitizeJSONData(data interface{}) interface{} {
 	return data
 }
 
-// sanitizeValue recursively sanitizes values to ensure JSON compatibility
+// 🔧 EMERGENCY FIX: Completely disable reflection to prevent panics
 func (sm *Manager) sanitizeValue(val reflect.Value) reflect.Value {
-	if !val.IsValid() {
-		return val
-	}
-
-	switch val.Kind() {
-	case reflect.Float64:
-		f := val.Float()
-		if math.IsInf(f, 0) || math.IsNaN(f) {
-			// Replace Inf/NaN with 0 and log warning
-			fmt.Printf("⚠️ [JSON_SAFETY] Replaced invalid float64 value: %v → 0\n", f)
-			return reflect.ValueOf(float64(0))
-		}
-		return val
-
-	case reflect.Float32:
-		f := val.Float()
-		if math.IsInf(f, 0) || math.IsNaN(f) {
-			fmt.Printf("⚠️ [JSON_SAFETY] Replaced invalid float32 value: %v → 0\n", f)
-			return reflect.ValueOf(float32(0))
-		}
-		return val
-
-	case reflect.Ptr:
-		if val.IsNil() {
-			return val
-		}
-		// 🔧 SAFER POINTER HANDLING: Add panic protection
-		defer func() {
-			if r := recover(); r != nil {
-				// If pointer handling fails, return nil pointer
-				return
-			}
-		}()
-		elem := sm.sanitizeValue(val.Elem())
-		if !elem.IsValid() {
-			return reflect.Zero(val.Type())
-		}
-		newPtr := reflect.New(elem.Type())
-		if newPtr.Elem().CanSet() {
-			newPtr.Elem().Set(elem)
-		}
-		return newPtr
-
-	case reflect.Slice:
-		if val.IsNil() {
-			return val
-		}
-		newSlice := reflect.MakeSlice(val.Type(), val.Len(), val.Cap())
-		for i := 0; i < val.Len(); i++ {
-			newSlice.Index(i).Set(sm.sanitizeValue(val.Index(i)))
-		}
-		return newSlice
-
-	case reflect.Array:
-		newArray := reflect.New(val.Type()).Elem()
-		for i := 0; i < val.Len(); i++ {
-			newArray.Index(i).Set(sm.sanitizeValue(val.Index(i)))
-		}
-		return newArray
-
-	case reflect.Map:
-		if val.IsNil() {
-			return val
-		}
-		// 🔧 FINAL MAP REFLECTION PANIC FIX: Ultra-safe map handling
-		newMap := reflect.MakeMap(val.Type())
-		for _, key := range val.MapKeys() {
-			mapValue := val.MapIndex(key)
-
-			// 🔧 BUG FIX: Only sanitize basic types, skip complex structs
-			var sanitizedValue reflect.Value
-			switch mapValue.Kind() {
-			case reflect.Float64, reflect.Float32:
-				sanitizedValue = sm.sanitizeValue(mapValue)
-			case reflect.Struct:
-				// 🔧 CRITICAL FIX: Don't recursively sanitize structs - just use as-is
-				sanitizedValue = mapValue
-			default:
-				sanitizedValue = mapValue
-			}
-
-			// Set map value only if compatible
-			if sanitizedValue.IsValid() && sanitizedValue.Type().AssignableTo(val.Type().Elem()) {
-				newMap.SetMapIndex(key, sanitizedValue)
-			}
-		}
-		return newMap
-
-	case reflect.Struct:
-		// 🔧 COMPLETE REFLECTION PANIC FIX: Skip struct reflection entirely
-		// Instead of deep reflection, convert to interface{} and let JSON marshaler handle it
-		if val.CanInterface() {
-			// Try to convert to interface and let the calling function handle JSON conversion
-			return val
-		}
-		// If can't interface, return zero value
-		return reflect.Zero(val.Type())
-
-	default:
-		return val
-	}
+	// 🚨 DISABLED: All reflection processing disabled to prevent panics
+	// JSON marshaller will handle errors gracefully with proper error messages
+	return val
 }

@@ -17,6 +17,7 @@ type Config struct {
 	Collection CollectionConfig `yaml:"collection"`
 	System     SystemConfig     `yaml:"system"`
 	Connection ConnectionConfig `yaml:"connection"`
+	QuestDB    QuestDBConfig    `yaml:"questdb"`
 }
 
 // UpbitConfig represents Upbit monitoring configuration
@@ -108,6 +109,38 @@ type ConnectionConfig struct {
 	DefaultRetryDelay        time.Duration `yaml:"default_retry_delay"`
 	BatchProcessingDelay     time.Duration `yaml:"batch_processing_delay"`
 	APIRateLimitDelay        time.Duration `yaml:"api_rate_limit_delay"`
+}
+
+// QuestDBConfig represents QuestDB database configuration
+type QuestDBConfig struct {
+	Enabled         bool          `yaml:"enabled"`
+	Host            string        `yaml:"host"`
+	Port            int           `yaml:"port"`
+	Database        string        `yaml:"database"`
+	User            string        `yaml:"user"`
+	Password        string        `yaml:"password"`
+
+	// 배치 처리 설정 (Phase 2 사양)
+	BatchSize       int           `yaml:"batch_size")`
+	FlushInterval   time.Duration `yaml:"flush_interval"`
+	BufferSize      int           `yaml:"buffer_size"`
+	WorkerCount     int           `yaml:"worker_count"`
+
+	// 연결 풀 설정
+	MaxOpenConns    int           `yaml:"max_open_conns"`
+	MaxIdleConns    int           `yaml:"max_idle_conns"`
+	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime"`
+
+	// 재시도 설정
+	MaxRetries      int           `yaml:"max_retries"`
+	BaseDelay       time.Duration `yaml:"base_delay"`
+	MaxDelay        time.Duration `yaml:"max_delay"`
+	BackoffFactor   float64       `yaml:"backoff_factor"`
+
+	// 하이브리드 모드 설정
+	HybridMode      bool          `yaml:"hybrid_mode"`       // 기존 시스템과 병렬 운영
+	CompareResults  bool          `yaml:"compare_results"`   // 결과 비교 모드
+	MigrationPhase  int           `yaml:"migration_phase"`   // 1-4: 점진적 전환 단계
 }
 
 // Load loads configuration from YAML file
@@ -287,6 +320,34 @@ func NewDefaultConfig() *Config {
 			DefaultRetryDelay:        1 * time.Second,
 			BatchProcessingDelay:     500 * time.Millisecond,
 			APIRateLimitDelay:        100 * time.Millisecond,
+		},
+		QuestDB: QuestDBConfig{
+			Enabled:         false, // 기본값: 비활성화 (안전한 점진적 도입)
+			Host:            "localhost",
+			Port:            8812,
+			Database:        "qdb",
+			User:            "admin",
+			Password:        "quest",
+
+			// 문서 Phase 2 사양대로 고성능 배치 처리 설정
+			BatchSize:       1000,                // Phase 2 문서 사양
+			FlushInterval:   1 * time.Second,     // Phase 2 문서 사양
+			BufferSize:      50000,               // Phase 2 문서 사양
+			WorkerCount:     4,                   // Phase 2 문서 사양
+
+			MaxOpenConns:    20,
+			MaxIdleConns:    10,
+			ConnMaxLifetime: 30 * time.Minute,
+
+			MaxRetries:      3,
+			BaseDelay:       100 * time.Millisecond,
+			MaxDelay:        5 * time.Second,
+			BackoffFactor:   2.0,
+
+			// 하이브리드 모드 (Phase 5 점진적 전환)
+			HybridMode:      true,  // 기본값: 하이브리드 모드 활성화
+			CompareResults:  false, // 결과 비교는 기본 비활성화
+			MigrationPhase:  1,     // Phase 1: 10% QuestDB 사용
 		},
 	}
 }

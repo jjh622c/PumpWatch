@@ -88,8 +88,8 @@ func main() {
 		logging.Info("✅ Pump analyzer initialized and connected to storage manager")
 	}
 
-	// Initialize EnhancedTaskManager - Complete Data Collection Architecture
-	taskManager, err := websocket.NewEnhancedTaskManager(ctx, cfg.Exchanges, symbolsConfig, storageManager)
+	// Initialize EnhancedTaskManager - Complete Data Collection Architecture with QuestDB
+	taskManager, err := websocket.NewEnhancedTaskManager(ctx, cfg.Exchanges, symbolsConfig, storageManager, cfg.QuestDB)
 	if err != nil {
 		logging.Fatal("❌ Failed to initialize EnhancedTaskManager: %v", err)
 	}

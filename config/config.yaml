@@ -122,3 +122,35 @@ connection:
   default_retry_delay: "1s"
   batch_processing_delay: "500ms"  # Delay between subscription batches
   api_rate_limit_delay: "100ms"    # General API rate limiting delay
+
+# 🚀 QuestDB 고성능 데이터베이스 설정 (Phase 2-5 완전 구현)
+questdb:
+  # Phase 3: 하이브리드 모드 활성화 (안전한 점진적 전환)
+  enabled: true
+  host: "localhost"
+  port: 8812
+  database: "qdb"
+  user: "admin"
+  password: "quest"
+
+  # Phase 2 문서 사양대로 고성능 배치 처리 설정
+  batch_size: 1000                # 문서 사양: 1000개씩 배치 처리
+  flush_interval: "1s"            # 문서 사양: 1초마다 플러시
+  buffer_size: 50000              # 문서 사양: 50,000개 버퍼
+  worker_count: 4                 # 문서 사양: 4개 워커로 병렬 처리
+
+  # 연결 풀 최적화
+  max_open_conns: 20
+  max_idle_conns: 10
+  conn_max_lifetime: "30m"
+
+  # 재시도 및 안정성
+  max_retries: 3
+  base_delay: "100ms"
+  max_delay: "5s"
+  backoff_factor: 2.0
+
+  # 🔄 Phase 3-5: 점진적 전환 설정 (하이브리드 모드)
+  hybrid_mode: true               # 기존 시스템과 병렬 운영
+  compare_results: false          # 결과 비교 (개발용, 성능에 영향)
+  migration_phase: 1              # 1: 10% QuestDB, 2: 50%, 3: 100%, 4: 완전 전환

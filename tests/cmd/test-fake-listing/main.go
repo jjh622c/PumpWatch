@@ -43,7 +43,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	taskManager, err := websocket.NewEnhancedTaskManager(ctx, cfg.Exchanges, symbolsConfig, storageManager)
+	taskManager, err := websocket.NewEnhancedTaskManager(ctx, cfg.Exchanges, symbolsConfig, storageManager, cfg.QuestDB)
 	if err != nil {
 		log.Fatalf("❌ Task Manager 초기화 실패: %v", err)
 	}
